@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "1051551305609",
+    "project_id": "hciproject-c67b9",
+    "storage_bucket": "hciproject-c67b9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1051551305609:android:293d221105d67d86bddb58",
+        "android_client_info": {
+          "package_name": "com.example.timebuddies"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1051551305609-g5duhd4j82j0sbkt6nae1s67hl7sekit.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaKztZXpaRzLqib3yOHktOyM_a9LAjR30"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1051551305609-g5duhd4j82j0sbkt6nae1s67hl7sekit.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
