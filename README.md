@@ -1,6 +1,6 @@
 # time_buddies
 
-A new Flutter project.
+A HCI_Project using Flutter framework and Dart programming. 
 
 ## Getting Started
 
