@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "1051551305609-mot4pj6rhonil22kejoh3i4mi03q4qg3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.timebuddies",
+            "certificate_hash": "ddd0c47c69bbf295ff72733603d8a793747e7d0d"
+          }
+        },
+        {
           "client_id": "1051551305609-g5duhd4j82j0sbkt6nae1s67hl7sekit.apps.googleusercontent.com",
           "client_type": 3
         }

@@ -11,13 +11,15 @@ tasks.register("clean", Delete) {
 }
 
 buildscript {
+    ext.kotlin_version = '1.9.0' // Ensure Kotlin is up-to-date
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.3.1'  // Use the latest version
-        classpath 'com.google.gms:google-services:4.3.15'  // Add this line for Firebase
+        classpath 'com.android.tools.build:gradle:8.0.1' // Ensure AGP is up-to-date
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        classpath 'com.google.gms:google-services:4.3.15' // Ensure Google Services plugin is up-to-date
     }
 }
 
@@ -27,4 +29,3 @@ allprojects {
         mavenCentral()
     }
 }
-

@@ -260,7 +260,7 @@ class AnalogClockPainter extends CustomPainter {
       textAlign: TextAlign.center,
       textDirection: TextDirection.ltr,
     );
-    final textStyle = TextStyle(color: Colors.black, fontSize: 20);
+    const textStyle = TextStyle(color: Colors.black, fontSize: 20);
 
     for (int i = 1; i <= 12; i++) {
       final angle = (i * 30) * (math.pi / 180);
