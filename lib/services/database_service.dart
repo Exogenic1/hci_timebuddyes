@@ -49,32 +49,55 @@ class DatabaseService {
     return groupRef.id; // Return the group ID
   }
 
+  Future<void> updateTask({
+    required String taskId,
+    required String title,
+    required String description,
+    required String status,
+    required DateTime dueDate,
+  }) async {
+    await _firestore.collection('tasks').doc(taskId).update({
+      'title': title,
+      'description': description,
+      'status': status,
+      'dueDate': dueDate,
+      'updatedAt': DateTime.now(),
+    });
+  }
+
   // Add a task to a group
   Future<String> addTask({
     required String title,
     required String description,
     required String assignedTo,
-    required String groupID,
+    String? groupId,
     required String status,
     required DateTime dueDate,
   }) async {
-    DocumentReference taskRef = await _firestore.collection('tasks').add({
+    final taskData = {
       'title': title,
       'description': description,
       'assignedTo': assignedTo,
-      'groupID': groupID,
       'status': status,
       'dueDate': dueDate,
       'createdAt': DateTime.now(),
       'updatedAt': DateTime.now(),
-    });
+    };
 
-    // Add the task ID to the group's tasks list
-    await _firestore.collection('groups').doc(groupID).update({
-      'tasks': FieldValue.arrayUnion([taskRef.id]),
-    });
+    if (groupId != null) {
+      taskData['groupID'] = groupId;
+    }
 
-    return taskRef.id; // Return the task ID
+    DocumentReference taskRef =
+        await _firestore.collection('tasks').add(taskData);
+
+    if (groupId != null) {
+      await _firestore.collection('groups').doc(groupId).update({
+        'tasks': FieldValue.arrayUnion([taskRef.id]),
+      });
+    }
+
+    return taskRef.id;
   }
 
   // Send a message to a group
@@ -90,6 +113,44 @@ class DatabaseService {
       'content': content,
       'type': type,
       'timestamp': DateTime.now(),
+    });
+  }
+
+// Add a task rating
+  Future<void> addTaskRating({
+    required String taskId,
+    required String groupId,
+    required String ratedUserId,
+    required int rating,
+    required String comments,
+    required String raterUserId,
+  }) async {
+    await _firestore.collection('taskRatings').add({
+      'taskId': taskId,
+      'groupId': groupId,
+      'ratedUserId': ratedUserId, // Who is being rated
+      'rating': rating, // 1-5 scale
+      'comments': comments,
+      'raterUserId':
+          raterUserId, // Who is giving the rating (anonymous to others)
+      'createdAt': DateTime.now(),
+    });
+  }
+
+// In the groups collection
+  Future<void> addGroupMember({
+    required String groupId,
+    required String userId,
+    required String role,
+  }) async {
+    await _firestore.collection('groups').doc(groupId).update({
+      'members': FieldValue.arrayUnion([
+        {
+          'userId': userId,
+          'role': role, // e.g., 'admin', 'member', 'leader'
+          'joinedAt': DateTime.now(),
+        }
+      ]),
     });
   }
 
