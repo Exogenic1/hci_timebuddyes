@@ -3,10 +3,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:intl/intl.dart';
 import 'package:time_buddies/services/database_service.dart';
 import 'package:time_buddies/widgets/task_dialog.dart';
 import 'package:time_buddies/widgets/confirmation_dialog.dart';
+import 'package:intl/intl.dart';
 
 class CalendarScreen extends StatefulWidget {
   const CalendarScreen({super.key});
@@ -25,6 +25,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
   bool _isLoading = true;
   bool _showGroupTasks = false;
   String? _selectedGroupId;
+  Map<String, bool> _groupLeadership = {};
+  Map<String, String> _groupNames = {};
+  Map<String, String> _groupLeaders = {};
 
   @override
   void initState() {
@@ -37,27 +40,66 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Future<void> _loadUserGroups() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       return;
     }
 
     try {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>?;
+        final groups = userData?['groups'] is List
+            ? List<String>.from(userData!['groups'] ?? [])
+            : [];
+
+        final leadershipMap = <String, bool>{};
+        final namesMap = <String, String>{};
+        final leadersMap = <String, String>{};
+
+        // Load group details in parallel
+        final groupFutures = groups.map((groupId) async {
+          try {
+            final groupDoc =
+                await _firestore.collection('groups').doc(groupId).get();
+            if (groupDoc.exists) {
+              final groupData = groupDoc.data() as Map<String, dynamic>?;
+              final leaderId = groupData?['leaderId'] ?? '';
+              leadershipMap[groupId] = leaderId == user.uid;
+              namesMap[groupId] =
+                  groupData?['name']?.toString() ?? 'Unnamed Group';
+              leadersMap[groupId] = leaderId;
+            }
+          } catch (e) {
+            debugPrint('Error loading group $groupId: $e');
+          }
+        });
+
+        await Future.wait(groupFutures);
+
+        if (!mounted) return;
+
         setState(() {
-          _userGroups = List<String>.from(userDoc.data()?['groups'] ?? []);
+          _userGroups = groups.cast<String>();
+          _groupLeadership = leadershipMap;
+          _groupNames = namesMap;
+          _groupLeaders = leadersMap;
           if (_userGroups.isNotEmpty) {
             _selectedGroupId = _userGroups.first;
+          }
+          if (_userGroups.isEmpty) {
+            _showGroupTasks = false;
           }
           _isLoading = false;
         });
         _loadEvents();
+      } else {
+        if (mounted) setState(() => _isLoading = false);
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading groups: $e')),
+          SnackBar(content: Text('Error loading groups: ${e.toString()}')),
         );
       }
     }
@@ -65,7 +107,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   Future<void> _loadEvents() async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
+    if (user == null || !mounted) return;
 
     try {
       QuerySnapshot querySnapshot;
@@ -93,13 +135,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
         newEvents[dateKey]!.add({...task, 'id': doc.id});
       }
 
+      if (!mounted) return;
       setState(() {
         _events = newEvents;
       });
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading tasks: $e')),
+          SnackBar(content: Text('Error loading tasks: ${e.toString()}')),
         );
       }
     }
@@ -108,6 +151,18 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Future<void> _addTask(DateTime selectedDate) async {
     final databaseService =
         Provider.of<DatabaseService>(context, listen: false);
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (_selectedGroupId == null || user == null) return;
+
+    if (_showGroupTasks && !(_groupLeadership[_selectedGroupId] ?? false)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Only group leaders can add tasks')),
+        );
+      }
+      return;
+    }
 
     await showDialog(
       context: context,
@@ -120,7 +175,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
     _loadEvents();
   }
 
-  Future<void> _deleteTask(String taskId) async {
+  Future<void> _deleteTask(String taskId, String? groupId) async {
+    if (groupId != null && !(_groupLeadership[groupId] ?? false)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Only group leaders can delete tasks')),
+        );
+      }
+      return;
+    }
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => const ConfirmationDialog(
@@ -142,13 +206,23 @@ class _CalendarScreenState extends State<CalendarScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error deleting task: $e')),
+          SnackBar(content: Text('Error deleting task: ${e.toString()}')),
         );
       }
     }
   }
 
   Future<void> _editTask(Map<String, dynamic> taskData, String taskId) async {
+    final groupId = taskData['groupID'];
+    if (groupId != null && !(_groupLeadership[groupId] ?? false)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Only group leaders can edit tasks')),
+        );
+      }
+      return;
+    }
+
     final databaseService =
         Provider.of<DatabaseService>(context, listen: false);
 
@@ -158,7 +232,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         databaseService: databaseService,
         taskToEdit: taskData,
         taskId: taskId,
-        groupId: taskData['groupID'],
+        groupId: groupId,
       ),
     );
     _loadEvents();
@@ -171,54 +245,90 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Widget _buildGroupSelector() {
     if (_userGroups.isEmpty) return const SizedBox();
 
-    return FutureBuilder<QuerySnapshot>(
-      future: _firestore
-          .collection('groups')
-          .where(FieldPath.documentId, whereIn: _userGroups)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) return const SizedBox();
-
-        final groups = snapshot.data!.docs;
-        if (groups.isEmpty) return const SizedBox();
-
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-          child: Row(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+      child: Card(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Group: '),
-              const SizedBox(width: 8),
-              DropdownButton<String>(
-                value: _selectedGroupId,
-                items: groups.map((group) {
-                  return DropdownMenuItem<String>(
-                    value: group.id,
-                    child: Text(group['name']),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedGroupId = newValue;
-                    _loadEvents();
-                  });
-                },
+              const Text(
+                'Task View',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
               ),
-              const SizedBox(width: 16),
-              Switch(
-                value: _showGroupTasks,
-                onChanged: (value) {
-                  setState(() {
-                    _showGroupTasks = value;
-                    _loadEvents();
-                  });
-                },
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _selectedGroupId,
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                      ),
+                      items: _userGroups.map((groupId) {
+                        return DropdownMenuItem<String>(
+                          value: groupId,
+                          child: Text(
+                            _groupNames[groupId] ?? 'Unnamed Group',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (String? newValue) {
+                        setState(() {
+                          _selectedGroupId = newValue;
+                          _loadEvents();
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Column(
+                    children: [
+                      Text(
+                        _showGroupTasks ? 'Group Tasks' : 'My Tasks',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      Switch(
+                        value: _showGroupTasks,
+                        onChanged: (value) {
+                          setState(() {
+                            _showGroupTasks = value;
+                            _loadEvents();
+                          });
+                        },
+                        activeColor: Theme.of(context).primaryColor,
+                      ),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(_showGroupTasks ? 'Group Tasks' : 'My Tasks'),
+              if (_showGroupTasks && _selectedGroupId != null)
+                Text(
+                  'You are ${_groupLeadership[_selectedGroupId] ?? false ? 'the leader' : 'a member'}',
+                  style: TextStyle(
+                    color: (_groupLeadership[_selectedGroupId] ?? false)
+                        ? Colors.green
+                        : Colors.blue,
+                    fontSize: 12,
+                  ),
+                ),
             ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -233,13 +343,23 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
     if (_isLoading) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Loading your calendar...'),
+            ],
+          ),
+        ),
       );
     }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Calendar'),
+        centerTitle: true,
         actions: [
           if (_userGroups.isNotEmpty)
             IconButton(
@@ -252,53 +372,79 @@ class _CalendarScreenState extends State<CalendarScreen> {
       body: Column(
         children: [
           _buildGroupSelector(),
-          TableCalendar(
-            firstDay: DateTime.utc(2020, 1, 1),
-            lastDay: DateTime.utc(2030, 12, 31),
-            focusedDay: _focusedDay,
-            calendarFormat: _calendarFormat,
-            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
-            onDaySelected: (selectedDay, focusedDay) {
-              setState(() {
-                _selectedDay = selectedDay;
-                _focusedDay = focusedDay;
-              });
-            },
-            onFormatChanged: (format) {
-              setState(() {
-                _calendarFormat = format;
-              });
-            },
-            onPageChanged: (focusedDay) {
-              _focusedDay = focusedDay;
-            },
-            eventLoader: _getEventsForDay,
-            calendarStyle: CalendarStyle(
-              markerDecoration: BoxDecoration(
-                color: Colors.blue,
-                shape: BoxShape.circle,
-              ),
-              markerSize: 8,
-              markerMargin: const EdgeInsets.symmetric(horizontal: 1),
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
-            headerStyle: HeaderStyle(
-              formatButtonVisible: true,
-              titleCentered: true,
+            child: TableCalendar(
+              firstDay: DateTime.utc(2020, 1, 1),
+              lastDay: DateTime.utc(2030, 12, 31),
+              focusedDay: _focusedDay,
+              calendarFormat: _calendarFormat,
+              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+              onDaySelected: (selectedDay, focusedDay) {
+                setState(() {
+                  _selectedDay = selectedDay;
+                  _focusedDay = focusedDay;
+                });
+              },
+              onFormatChanged: (format) {
+                setState(() {
+                  _calendarFormat = format;
+                });
+              },
+              onPageChanged: (focusedDay) {
+                _focusedDay = focusedDay;
+              },
+              eventLoader: _getEventsForDay,
+              calendarStyle: CalendarStyle(
+                markerDecoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor,
+                  shape: BoxShape.circle,
+                ),
+                markerSize: 8,
+                markerMargin: const EdgeInsets.symmetric(horizontal: 1),
+                todayDecoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor.withOpacity(0.3),
+                  shape: BoxShape.circle,
+                ),
+                selectedDecoration: BoxDecoration(
+                  color: Theme.of(context).primaryColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              headerStyle: HeaderStyle(
+                formatButtonVisible: true,
+                titleCentered: true,
+                formatButtonDecoration: BoxDecoration(
+                  border: Border.all(color: Theme.of(context).primaryColor),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                formatButtonTextStyle: TextStyle(
+                  color: Theme.of(context).primaryColor,
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           Expanded(
             child: _selectedDay == null
-                ? const Center(child: Text('No day selected'))
+                ? const Center(child: Text('Select a day to view tasks'))
                 : _buildTaskList(),
           ),
         ],
       ),
-      floatingActionButton: _userGroups.isNotEmpty
+      floatingActionButton: _userGroups.isNotEmpty &&
+              (!_showGroupTasks ||
+                  (_selectedGroupId != null &&
+                      (_groupLeadership[_selectedGroupId] ?? false)))
           ? FloatingActionButton(
               onPressed: () => _addTask(_selectedDay ?? DateTime.now()),
-              child: const Icon(Icons.add),
               tooltip: 'Add Task',
+              backgroundColor: Theme.of(context).primaryColor,
+              child: const Icon(Icons.add, color: Colors.white),
             )
           : null,
     );
@@ -311,12 +457,22 @@ class _CalendarScreenState extends State<CalendarScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.event_note, size: 48, color: Colors.grey),
+            Icon(Icons.event_note, size: 48, color: Colors.grey[400]),
             const SizedBox(height: 16),
-            const Text('No tasks for this day'),
-            const SizedBox(height: 8),
+            Text(
+              'No tasks for ${DateFormat('MMM d, y').format(_selectedDay!)}',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+            const SizedBox(height: 16),
             ElevatedButton(
               onPressed: () => _addTask(_selectedDay!),
+              style: ElevatedButton.styleFrom(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
               child: const Text('Add Task'),
             ),
           ],
@@ -325,10 +481,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
     }
 
     return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 80),
       itemCount: events.length,
       itemBuilder: (context, index) {
         final task = events[index];
         final taskId = task['id'];
+        final groupId = task['groupID'];
+        final isLeader =
+            groupId != null ? (_groupLeadership[groupId] ?? false) : true;
+        final isAssignedToMe =
+            task['assignedTo'] == FirebaseAuth.instance.currentUser?.uid;
 
         Color statusColor = Colors.grey;
         if (task['status'] == 'Pending') statusColor = Colors.orange;
@@ -337,16 +499,61 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
         return Card(
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: ListTile(
-            title: Text(task['title']),
-            subtitle: Column(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        task['title'],
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    if (isLeader || isAssignedToMe)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: Icon(Icons.edit,
+                                color: Theme.of(context).primaryColor),
+                            onPressed: () => _editTask(task, taskId),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteTask(taskId, groupId),
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
                 if (task['description'] != null &&
                     task['description'].isNotEmpty)
-                  Text(task['description']),
-                const SizedBox(height: 4),
-                Row(
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      task['description'],
+                      style: TextStyle(color: Colors.grey[700]),
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
                     Chip(
                       label: Text(
@@ -354,46 +561,49 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         style: const TextStyle(color: Colors.white),
                       ),
                       backgroundColor: statusColor,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
-                    if (_showGroupTasks &&
-                        task['assignedTo'] !=
-                            FirebaseAuth.instance.currentUser?.uid)
-                      const SizedBox(width: 8),
-                    if (_showGroupTasks &&
-                        task['assignedTo'] !=
-                            FirebaseAuth.instance.currentUser?.uid)
+                    if (_showGroupTasks && !isAssignedToMe)
                       FutureBuilder<DocumentSnapshot>(
                         future: _firestore
                             .collection('users')
                             .doc(task['assignedTo'])
                             .get(),
                         builder: (context, snapshot) {
-                          if (snapshot.hasData) {
+                          if (snapshot.hasData && snapshot.data!.exists) {
+                            final userData =
+                                snapshot.data!.data() as Map<String, dynamic>;
                             return Chip(
                               label: Text(
-                                snapshot.data!['name'] ?? 'Member',
+                                userData['name'] ?? 'Member',
                                 style: const TextStyle(color: Colors.white),
                               ),
                               backgroundColor: Colors.purple,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             );
                           }
                           return const SizedBox();
                         },
                       ),
+                    Chip(
+                      label: Text(
+                        DateFormat('MMM d, y')
+                            .format((task['dueDate'] as Timestamp).toDate()),
+                        style: TextStyle(
+                          color: Theme.of(context).primaryColor,
+                        ),
+                      ),
+                      backgroundColor:
+                          Theme.of(context).primaryColor.withOpacity(0.1),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                   ],
-                ),
-              ],
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: () => _editTask(task, taskId),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
-                  onPressed: () => _deleteTask(taskId),
                 ),
               ],
             ),

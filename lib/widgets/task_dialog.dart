@@ -10,6 +10,7 @@ class TaskDialog extends StatefulWidget {
   final String? groupId;
   final Map<String, dynamic>? taskToEdit;
   final String? taskId;
+  final String? assignedTo; // New parameter for assigned user
 
   const TaskDialog({
     super.key,
@@ -18,6 +19,7 @@ class TaskDialog extends StatefulWidget {
     this.groupId,
     this.taskToEdit,
     this.taskId,
+    this.assignedTo,
   });
 
   @override
@@ -29,7 +31,11 @@ class TaskDialogState extends State<TaskDialog> {
   final TextEditingController _descriptionController = TextEditingController();
   String _status = 'Pending';
   DateTime? _dueDate;
+  String? _assignedTo;
+  List<Map<String, dynamic>> _groupMembers = [];
+  bool _isLoadingMembers = false;
 
+  // In initState, modify how we get the assignedTo value:
   @override
   void initState() {
     super.initState();
@@ -38,8 +44,74 @@ class TaskDialogState extends State<TaskDialog> {
       _descriptionController.text = widget.taskToEdit!['description'] ?? '';
       _status = widget.taskToEdit!['status'] ?? 'Pending';
       _dueDate = (widget.taskToEdit!['dueDate'] as Timestamp).toDate();
+
+      // Handle both String and Map cases for assignedTo
+      final assignedTo = widget.taskToEdit!['assignedTo'];
+      if (assignedTo is String) {
+        _assignedTo = assignedTo;
+      } else if (assignedTo is Map) {
+        _assignedTo = assignedTo['id'] ?? assignedTo['uid'];
+      }
     } else if (widget.initialDate != null) {
       _dueDate = widget.initialDate;
+    }
+
+    _assignedTo = widget.assignedTo ??
+        _assignedTo ??
+        FirebaseAuth.instance.currentUser?.uid;
+
+    if (widget.groupId != null) {
+      _loadGroupMembers();
+    }
+  }
+
+  Future<void> _loadGroupMembers() async {
+    setState(() => _isLoadingMembers = true);
+    try {
+      final groupDoc = await FirebaseFirestore.instance
+          .collection('groups')
+          .doc(widget.groupId)
+          .get();
+
+      if (groupDoc.exists) {
+        // Ensure we're getting a List<String> for members
+        final memberIds = List<String>.from(groupDoc.get('members') ?? []);
+        final members = <Map<String, dynamic>>[];
+
+        for (var memberId in memberIds) {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(memberId)
+              .get();
+          if (userDoc.exists) {
+            members.add({
+              'id': memberId,
+              'name': userDoc.get('name') ?? 'Unknown',
+              'email': userDoc.get('email') ?? '',
+            });
+          }
+        }
+
+        setState(() {
+          _groupMembers = members;
+          if (widget.taskToEdit == null &&
+              _assignedTo == null &&
+              members.any(
+                  (m) => m['id'] == FirebaseAuth.instance.currentUser?.uid)) {
+            _assignedTo = FirebaseAuth.instance.currentUser?.uid;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading members: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingMembers = false);
+      }
     }
   }
 
@@ -77,13 +149,14 @@ class TaskDialogState extends State<TaskDialog> {
           description: _descriptionController.text.trim(),
           status: _status,
           dueDate: _dueDate!,
+          assignedTo: _assignedTo ?? '',
         );
       } else {
         // Create new task
         await widget.databaseService.addTask(
           title: _titleController.text.trim(),
           description: _descriptionController.text.trim(),
-          assignedTo: user.uid,
+          assignedTo: _assignedTo ?? user.uid,
           groupId: widget.groupId,
           status: _status,
           dueDate: _dueDate!,
@@ -105,6 +178,35 @@ class TaskDialogState extends State<TaskDialog> {
     _titleController.dispose();
     _descriptionController.dispose();
     super.dispose();
+  }
+
+  Widget _buildMemberDropdown() {
+    if (_isLoadingMembers) {
+      return const CircularProgressIndicator();
+    }
+
+    if (_groupMembers.isEmpty) {
+      return const Text('No members available');
+    }
+
+    return DropdownButtonFormField<String>(
+      value: _assignedTo,
+      items: _groupMembers.map((member) {
+        return DropdownMenuItem<String>(
+          value: member['id'],
+          child: Text('${member['name']} (${member['email']})'),
+        );
+      }).toList(),
+      onChanged: (String? newValue) {
+        setState(() {
+          _assignedTo = newValue;
+        });
+      },
+      decoration: const InputDecoration(
+        labelText: 'Assign To',
+        border: OutlineInputBorder(),
+      ),
+    );
   }
 
   @override
@@ -151,6 +253,10 @@ class TaskDialogState extends State<TaskDialog> {
               ),
             ),
             const SizedBox(height: 16),
+            if (widget.groupId != null) ...[
+              _buildMemberDropdown(),
+              const SizedBox(height: 16),
+            ],
             ListTile(
               title: Text(
                 _dueDate == null

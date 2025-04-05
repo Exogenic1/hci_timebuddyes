@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
@@ -44,6 +45,55 @@ class AuthService {
     } catch (e) {
       _handleAuthError(context, 'Google sign-in failed. Please try again.');
     }
+  }
+
+  // Add this to your AuthService class
+  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+
+  Future<void> handleSuccessfulSignIn({
+    required BuildContext context,
+    required User user,
+    required GoogleSignInAccount googleUser,
+  }) async {
+    final databaseService =
+        Provider.of<DatabaseService>(context, listen: false);
+
+    // Get FCM token
+    String? fcmToken;
+    try {
+      fcmToken = await _firebaseMessaging.getToken();
+      await _firebaseMessaging.subscribeToTopic('all_users');
+    } catch (e) {
+      debugPrint('Error getting FCM token: $e');
+    }
+
+    await databaseService.addUser(
+      userID: user.uid,
+      name: googleUser.displayName ?? 'User',
+      email: googleUser.email,
+      profilePicture: googleUser.photoUrl ?? '',
+      fcmToken: fcmToken,
+    );
+
+    // Safe navigation using NavigatorState
+    if (context.mounted) {
+      Navigator.of(context).pushReplacementNamed('/home');
+    }
+  }
+
+// Add this to your signOut method
+  Future<void> signOut() async {
+    try {
+      await _firebaseMessaging.deleteToken();
+      await _firebaseMessaging.unsubscribeFromTopic('all_users');
+    } catch (e) {
+      debugPrint('Error clearing FCM token: $e');
+    }
+
+    await Future.wait([
+      _googleSignIn.signOut(),
+      _auth.signOut(),
+    ]);
   }
 
   Future<void> _handleSuccessfulSignIn({
@@ -101,14 +151,6 @@ class AuthService {
       debugPrint('Email Sign-Up Error: $e');
       return null;
     }
-  }
-
-  // Sign out
-  Future<void> signOut() async {
-    await Future.wait([
-      _googleSignIn.signOut(),
-      _auth.signOut(),
-    ]);
   }
 
   // Get current user

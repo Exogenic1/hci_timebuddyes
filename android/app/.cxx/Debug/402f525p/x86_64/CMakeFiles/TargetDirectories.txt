@@ -1,0 +1,2 @@
+C:/Users/jesie/Documents/HCI_App/time_buddies/android/app/.cxx/Debug/402f525p/x86_64/CMakeFiles/edit_cache.dir
+C:/Users/jesie/Documents/HCI_App/time_buddies/android/app/.cxx/Debug/402f525p/x86_64/CMakeFiles/rebuild_cache.dir

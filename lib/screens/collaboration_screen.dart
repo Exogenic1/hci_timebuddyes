@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
-// import 'package:time_buddies/widgets/role_badge.dart';
 import 'package:time_buddies/screens/group_chat_screen.dart';
-import 'package:share_plus/share_plus.dart';
 
 class CollaborationScreen extends StatefulWidget {
   const CollaborationScreen({super.key});
@@ -28,281 +25,202 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
     super.dispose();
   }
 
-  bool _hasUnreadMessages(String chatId) {
-    // Implement your unread messages logic here
-    return false;
-  }
-
-  void _openChatScreen(BuildContext context, String chatId, String groupName) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => GroupChatScreen(
-          chatId: chatId,
-          groupName: groupName,
-          currentUserId: _currentUser?.uid ?? '',
-        ),
-      ),
-    );
-  }
-
-  void _copyGroupId(String groupId) {
-    Clipboard.setData(ClipboardData(text: groupId));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Group ID copied to clipboard')),
-    );
-  }
-
-  void _shareGroupId(String groupId, String groupName) {
-    Share.share(
-      'Join my Time Buddies group "$groupName" using this ID: $groupId',
-      subject: 'Join my Time Buddies group!',
-    );
-  }
-
   Future<void> _createGroup() async {
-    if (_currentUser == null) return;
+    if (_currentUser == null || !mounted) return;
 
     if (_groupNameController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a group name')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Group name is required')),
+        );
+      }
       return;
     }
 
     try {
-      // Create a new document reference to get the ID first
       final groupRef = _firestore.collection('groups').doc();
+      final groupId = groupRef.id;
 
-      // Create the group with the creator as leader
       await groupRef.set({
-        'id': groupRef.id,
+        'id': groupId,
         'name': _groupNameController.text.trim(),
         'description': _groupDescriptionController.text.trim(),
+        'leaderId': _currentUser.uid,
         'createdBy': _currentUser.uid,
         'createdAt': DateTime.now(),
+        'updatedAt': DateTime.now(),
         'members': [
           {
             'userId': _currentUser.uid,
             'role': 'leader',
             'joinedAt': DateTime.now(),
+            'name': _currentUser.displayName ?? 'Leader',
+            'email': _currentUser.email,
           }
         ],
         'tasks': [],
-        'chatId': groupRef.id, // Same ID for chat reference
       });
 
-      // Update user's groups list
-      await _firestore.collection('users').doc(_currentUser.uid).update({
-        'groups': FieldValue.arrayUnion([groupRef.id]),
-      });
-
-      // Create a corresponding chat document
-      await _firestore.collection('chats').doc(groupRef.id).set({
-        'groupId': groupRef.id,
+      await _firestore.collection('chats').doc(groupId).set({
+        'groupId': groupId,
         'groupName': _groupNameController.text.trim(),
-        'createdAt': DateTime.now(),
-        'createdBy': _currentUser.uid,
-        'lastMessage': '',
-        'lastMessageTime': DateTime.now(),
-        'lastMessageSender': _currentUser.uid,
+        'leaderId': _currentUser.uid,
         'members': [_currentUser.uid],
+        'createdAt': DateTime.now(),
+        'lastMessage': null,
+        'lastMessageTime': null,
+      });
+
+      await _firestore.collection('users').doc(_currentUser.uid).update({
+        'groups': FieldValue.arrayUnion([groupId]),
       });
 
       if (mounted) {
-        // Show a dialog with the group ID
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Group Created'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                    'Your group was created successfully. Share this ID with friends to invite them:'),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          groupRef.id,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.copy),
-                        onPressed: () => _copyGroupId(groupRef.id),
-                        tooltip: 'Copy ID',
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Group created successfully! ID: $groupId'),
+            action: SnackBarAction(
+              label: 'Copy ID',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: groupId));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                        content: Text('Group ID copied to clipboard!')),
+                  );
+                }
+              },
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  _shareGroupId(groupRef.id, _groupNameController.text.trim());
-                  Navigator.pop(context);
-                },
-                child: const Text('Share'),
-              ),
-            ],
           ),
         );
-
         _groupNameController.clear();
         _groupDescriptionController.clear();
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error creating group: $e')),
+          SnackBar(content: Text('Error creating group: ${e.toString()}')),
         );
       }
     }
   }
 
   Future<void> _joinGroup(String groupId) async {
-    if (_currentUser == null) return;
+    if (_currentUser == null || !mounted || groupId.isEmpty) return;
 
     try {
-      // Check if the group exists
       final groupDoc = await _firestore.collection('groups').doc(groupId).get();
       if (!groupDoc.exists) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content:
-                  Text('Group not found. Please check the ID and try again')),
-        );
-        return;
+        throw Exception('Group not found');
       }
 
-      // Check if user is already a member
-      final groupData = groupDoc.data() as Map<String, dynamic>;
-      final members =
-          List<Map<String, dynamic>>.from(groupData['members'] ?? []);
-      if (members.any((m) => m['userId'] == _currentUser.uid)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('You are already a member of this group')),
-        );
-        return;
-      }
+      final groupData = groupDoc.data();
+      if (groupData == null) throw Exception('Group data is null');
 
-      // Add user as a member with default 'member' role
       await _firestore.collection('groups').doc(groupId).update({
         'members': FieldValue.arrayUnion([
           {
             'userId': _currentUser.uid,
             'role': 'member',
-            'joinedAt': FieldValue.serverTimestamp(),
+            'joinedAt': DateTime.now(),
           }
         ]),
       });
 
-      // Update user's groups list
-      await _firestore.collection('users').doc(_currentUser.uid).update({
-        'groups': FieldValue.arrayUnion([groupId]),
-      });
-
-      // Add user to chat members
       await _firestore.collection('chats').doc(groupId).update({
         'members': FieldValue.arrayUnion([_currentUser.uid]),
       });
 
+      await _firestore.collection('users').doc(_currentUser.uid).update({
+        'groups': FieldValue.arrayUnion([groupId]),
+      });
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Joined group successfully')),
+          const SnackBar(content: Text('Joined group successfully!')),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error joining group: $e')),
+          SnackBar(content: Text('Error joining group: ${e.toString()}')),
         );
       }
     }
   }
 
   Widget _buildGroupTile(DocumentSnapshot group) {
-    final data = group.data() as Map<String, dynamic>;
-    final members = List<Map<String, dynamic>>.from(data['members'] ?? []);
-    final isLeader = members
-        .any((m) => m['userId'] == _currentUser?.uid && m['role'] == 'leader');
+    final data = group.data() as Map<String, dynamic>?;
+    if (data == null) return const SizedBox();
+
+    final name = data['name'] as String? ?? 'Unnamed Group';
+    final description = data['description'] as String? ?? 'No description';
+    final leaderId = data['leaderId'] as String? ?? '';
+    final isCurrentUserLeader = _currentUser?.uid == leaderId;
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      child: Column(
-        children: [
-          ListTile(
-            title: Text(data['name']),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListTile(
+        title: Text(name),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(description),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 4,
               children: [
-                Text(data['description'] ?? 'No description'),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 4,
-                  children: [
-                    Chip(
-                      label: Text('${members.length} members'),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    if (isLeader)
-                      const Chip(
-                        label: Text('Leader'),
-                        visualDensity: VisualDensity.compact,
-                        backgroundColor: Colors.orange,
-                      ),
-                  ],
+                Chip(
+                  label: Text(
+                      '${(data['members'] as List?)?.length ?? 0} members'),
+                  visualDensity: VisualDensity.compact,
                 ),
+                if (isCurrentUserLeader)
+                  const Chip(
+                    label: Text('Leader'),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Colors.orange,
+                  ),
               ],
             ),
-            trailing: const Icon(Icons.arrow_forward),
-            onTap: () {
-              // Navigate to group details or chat
-              _openChatScreen(context, data['chatId'], data['name']);
-            },
-          ),
-          // Group ID section
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                const Text('Group ID: ',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                Expanded(
-                  child: Text(
-                    data['id'] ?? group.id,
-                    style: const TextStyle(fontFamily: 'monospace'),
+          ],
+        ),
+        trailing: PopupMenuButton<String>(
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: 'copy',
+              child: Text('Copy Group ID'),
+            ),
+            const PopupMenuItem(
+              value: 'chat',
+              child: Text('Open Chat'),
+            ),
+          ],
+          onSelected: (value) async {
+            if (value == 'copy') {
+              await Clipboard.setData(ClipboardData(text: group.id));
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                      content: Text('Group ID copied to clipboard!')),
+                );
+              }
+            } else if (value == 'chat' && _currentUser != null) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => GroupChatScreen(
+                    chatId: group.id,
+                    groupName: name,
+                    currentUserId: _currentUser.uid,
+                    currentUserName: _currentUser.displayName ?? 'User',
+                    groupLeaderId: leaderId,
                   ),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.copy, size: 20),
-                  onPressed: () => _copyGroupId(data['id'] ?? group.id),
-                  tooltip: 'Copy ID',
-                ),
-                IconButton(
-                  icon: const Icon(Icons.share, size: 20),
-                  onPressed: () =>
-                      _shareGroupId(data['id'] ?? group.id, data['name']),
-                  tooltip: 'Share ID',
-                ),
-              ],
-            ),
-          ),
-        ],
+              );
+            }
+          },
+        ),
       ),
     );
   }
@@ -331,10 +249,8 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
             StreamBuilder<QuerySnapshot>(
               stream: _firestore
                   .collection('groups')
-                  .where('members', arrayContains: {
-                'userId': _currentUser.uid,
-                'role': 'leader',
-              }).snapshots(),
+                  .where('members.userId', isEqualTo: _currentUser.uid)
+                  .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.hasError) {
                   return Center(child: Text('Error: ${snapshot.error}'));
@@ -343,6 +259,8 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
+
+                final groups = snapshot.data?.docs ?? [];
 
                 return Column(
                   children: [
@@ -377,9 +295,9 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                     // Group List
                     Expanded(
                       child: ListView.builder(
-                        itemCount: snapshot.data?.docs.length ?? 0,
+                        itemCount: groups.length,
                         itemBuilder: (context, index) {
-                          return _buildGroupTile(snapshot.data!.docs[index]);
+                          return _buildGroupTile(groups[index]);
                         },
                       ),
                     ),
@@ -394,54 +312,77 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                   .where('members', arrayContains: _currentUser.uid)
                   .orderBy('lastMessageTime', descending: true)
                   .snapshots(),
-              builder: (context, chatSnapshot) {
-                if (chatSnapshot.hasError) {
-                  return Center(child: Text('Error: ${chatSnapshot.error}'));
+              builder: (context, snapshot) {
+                if (snapshot.hasError) {
+                  return Center(child: Text('Error: ${snapshot.error}'));
                 }
 
-                if (chatSnapshot.connectionState == ConnectionState.waiting) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (chatSnapshot.data?.docs.isEmpty ?? true) {
+                final chats = snapshot.data?.docs ?? [];
+                if (chats.isEmpty) {
                   return const Center(child: Text('No chats available'));
                 }
 
                 return ListView.builder(
-                  itemCount: chatSnapshot.data!.docs.length,
+                  itemCount: chats.length,
                   itemBuilder: (context, index) {
-                    final chatDoc = chatSnapshot.data!.docs[index];
-                    final chatData = chatDoc.data() as Map<String, dynamic>;
+                    final chat = chats[index];
+                    final chatData = chat.data() as Map<String, dynamic>? ?? {};
 
-                    return ListTile(
-                      leading: const CircleAvatar(child: Icon(Icons.group)),
-                      title: Text(chatData['groupName'] ?? 'Group Chat'),
-                      subtitle: Text(
-                        chatData['lastMessage']?.isNotEmpty ?? false
-                            ? chatData['lastMessage']
-                            : 'No messages yet',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            DateFormat('HH:mm').format(
-                              (chatData['lastMessageTime'] as Timestamp)
-                                  .toDate(),
-                            ),
-                            style: Theme.of(context).textTheme.bodySmall,
+                    return FutureBuilder<DocumentSnapshot>(
+                      future: _firestore
+                          .collection('groups')
+                          .doc(chatData['groupId'] as String?)
+                          .get(),
+                      builder: (context, groupSnapshot) {
+                        if (!groupSnapshot.hasData) {
+                          return const ListTile(title: Text('Loading...'));
+                        }
+
+                        final groupData = groupSnapshot.data!.data()
+                                as Map<String, dynamic>? ??
+                            {};
+                        final groupName =
+                            groupData['name'] as String? ?? 'Unknown Group';
+
+                        return ListTile(
+                          leading: const CircleAvatar(child: Icon(Icons.group)),
+                          title: Text(groupName),
+                          subtitle: Text(chatData['lastMessage'] as String? ??
+                              'No messages yet'),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.content_copy),
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                  ClipboardData(text: chat.id));
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                      content: Text('Chat ID copied!')),
+                                );
+                              }
+                            },
                           ),
-                          if (_hasUnreadMessages(chatDoc.id))
-                            const CircleAvatar(
-                              radius: 4,
-                              backgroundColor: Colors.red,
-                            ),
-                        ],
-                      ),
-                      onTap: () => _openChatScreen(context, chatDoc.id,
-                          chatData['groupName'] ?? 'Group'),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => GroupChatScreen(
+                                  chatId: chat.id,
+                                  groupName: groupName,
+                                  currentUserId: _currentUser.uid,
+                                  currentUserName: '',
+                                  groupLeaderId:
+                                      groupData['leaderId'] as String? ?? '',
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
                     );
                   },
                 );
@@ -457,12 +398,28 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                 final groupIdController = TextEditingController();
                 return AlertDialog(
                   title: const Text('Join Group'),
-                  content: TextField(
-                    controller: groupIdController,
-                    decoration: const InputDecoration(
-                      labelText: 'Enter Group ID',
-                      border: OutlineInputBorder(),
-                    ),
+                  content: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: groupIdController,
+                        decoration: const InputDecoration(
+                          labelText: 'Enter Group ID',
+                          hintText: 'Paste the group ID here',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: () async {
+                          final clipboardData =
+                              await Clipboard.getData('text/plain');
+                          if (clipboardData != null) {
+                            groupIdController.text = clipboardData.text ?? '';
+                          }
+                        },
+                        child: const Text('Paste from clipboard'),
+                      ),
+                    ],
                   ),
                   actions: [
                     TextButton(
@@ -471,7 +428,9 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
                     ),
                     TextButton(
                       onPressed: () {
-                        _joinGroup(groupIdController.text.trim());
+                        if (groupIdController.text.trim().isNotEmpty) {
+                          _joinGroup(groupIdController.text.trim());
+                        }
                         Navigator.pop(context);
                       },
                       child: const Text('Join'),

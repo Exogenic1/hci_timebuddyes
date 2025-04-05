@@ -9,15 +9,24 @@ class DatabaseService {
     required String name,
     required String email,
     String? profilePicture,
+    String? fcmToken,
   }) async {
     await _firestore.collection('users').doc(userID).set({
       'name': name,
       'email': email,
-      'profilePicture':
-          profilePicture ?? '', // Use an empty string if no picture is provided
+      'profilePicture': profilePicture ?? '',
+      'fcmToken': fcmToken,
       'createdAt': DateTime.now(),
       'updatedAt': DateTime.now(),
-      'groups': [], // Initialize with an empty list of groups
+      'groups': [],
+    }, SetOptions(merge: true)); // Use merge to not overwrite existing data
+  }
+
+// Add this new method
+  Future<void> updateFcmToken(String userID, String? fcmToken) async {
+    await _firestore.collection('users').doc(userID).update({
+      'fcmToken': fcmToken,
+      'updatedAt': DateTime.now(),
     });
   }
 
@@ -55,12 +64,14 @@ class DatabaseService {
     required String description,
     required String status,
     required DateTime dueDate,
+    required String assignedTo,
   }) async {
-    await _firestore.collection('tasks').doc(taskId).update({
+    await FirebaseFirestore.instance.collection('tasks').doc(taskId).update({
       'title': title,
       'description': description,
       'status': status,
       'dueDate': dueDate,
+      'assignedTo': assignedTo,
       'updatedAt': DateTime.now(),
     });
   }
