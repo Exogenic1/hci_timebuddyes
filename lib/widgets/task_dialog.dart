@@ -1,175 +1,72 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:time_buddies/services/database_service.dart';
 import 'package:intl/intl.dart';
+import 'package:time_buddies/services/database_service.dart';
 
 class TaskDialog extends StatefulWidget {
   final DatabaseService databaseService;
   final DateTime? initialDate;
-  final String? groupId;
   final Map<String, dynamic>? taskToEdit;
   final String? taskId;
-  final String? assignedTo; // New parameter for assigned user
+  final String groupId;
+  final String currentUserId;
+  final List<Map<String, dynamic>> membersList; // Add this parameter
 
   const TaskDialog({
     super.key,
     required this.databaseService,
     this.initialDate,
-    this.groupId,
     this.taskToEdit,
     this.taskId,
-    this.assignedTo,
+    required this.groupId,
+    required this.currentUserId,
+    this.membersList = const [], // Default to empty list
   });
 
   @override
-  TaskDialogState createState() => TaskDialogState();
+  State<TaskDialog> createState() => _TaskDialogState();
 }
 
-class TaskDialogState extends State<TaskDialog> {
+class _TaskDialogState extends State<TaskDialog> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  String _status = 'Pending';
-  DateTime? _dueDate;
-  String? _assignedTo;
-  List<Map<String, dynamic>> _groupMembers = [];
-  bool _isLoadingMembers = false;
+  DateTime _selectedDate = DateTime.now();
+  String _status = 'In-Progress'; // Default status is now In-Progress
+  String? _assignedToUserId;
+  bool _isLoading = false;
+  String _assignedToUserName = 'Select Member';
+  List<Map<String, dynamic>> _members = [];
 
-  // In initState, modify how we get the assignedTo value:
+  // Changed to only two options
+  final List<String> _statusOptions = ['In-Progress', 'Completed'];
+
   @override
   void initState() {
     super.initState();
+    _selectedDate = widget.initialDate ?? DateTime.now();
+    _members = List.from(widget.membersList);
+
+    // If there's only one member in the group, auto-select them
+    if (_members.length == 1) {
+      _assignedToUserId = _members.first['userId'];
+      _assignedToUserName = _members.first['name'];
+    }
+
     if (widget.taskToEdit != null) {
       _titleController.text = widget.taskToEdit!['title'] ?? '';
       _descriptionController.text = widget.taskToEdit!['description'] ?? '';
-      _status = widget.taskToEdit!['status'] ?? 'Pending';
-      _dueDate = (widget.taskToEdit!['dueDate'] as Timestamp).toDate();
-
-      // Handle both String and Map cases for assignedTo
-      final assignedTo = widget.taskToEdit!['assignedTo'];
-      if (assignedTo is String) {
-        _assignedTo = assignedTo;
-      } else if (assignedTo is Map) {
-        _assignedTo = assignedTo['id'] ?? assignedTo['uid'];
+      if (widget.taskToEdit!['dueDate'] != null) {
+        _selectedDate = (widget.taskToEdit!['dueDate'] as Timestamp).toDate();
       }
-    } else if (widget.initialDate != null) {
-      _dueDate = widget.initialDate;
+      // Use the existing status or default to In-Progress
+      _status = widget.taskToEdit!['status'] ?? 'In-Progress';
+      _assignedToUserId = widget.taskToEdit!['assignedTo'];
+
+      _loadAssignedUserDetails();
     }
 
-    _assignedTo = widget.assignedTo ??
-        _assignedTo ??
-        FirebaseAuth.instance.currentUser?.uid;
-
-    if (widget.groupId != null) {
+    if (_members.isEmpty) {
       _loadGroupMembers();
-    }
-  }
-
-  Future<void> _loadGroupMembers() async {
-    setState(() => _isLoadingMembers = true);
-    try {
-      final groupDoc = await FirebaseFirestore.instance
-          .collection('groups')
-          .doc(widget.groupId)
-          .get();
-
-      if (groupDoc.exists) {
-        // Ensure we're getting a List<String> for members
-        final memberIds = List<String>.from(groupDoc.get('members') ?? []);
-        final members = <Map<String, dynamic>>[];
-
-        for (var memberId in memberIds) {
-          final userDoc = await FirebaseFirestore.instance
-              .collection('users')
-              .doc(memberId)
-              .get();
-          if (userDoc.exists) {
-            members.add({
-              'id': memberId,
-              'name': userDoc.get('name') ?? 'Unknown',
-              'email': userDoc.get('email') ?? '',
-            });
-          }
-        }
-
-        setState(() {
-          _groupMembers = members;
-          if (widget.taskToEdit == null &&
-              _assignedTo == null &&
-              members.any(
-                  (m) => m['id'] == FirebaseAuth.instance.currentUser?.uid)) {
-            _assignedTo = FirebaseAuth.instance.currentUser?.uid;
-          }
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading members: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoadingMembers = false);
-      }
-    }
-  }
-
-  Future<void> _selectDueDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _dueDate ?? DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime(2101),
-    );
-    if (picked != null && picked != _dueDate) {
-      setState(() {
-        _dueDate = picked;
-      });
-    }
-  }
-
-  Future<void> _handleTaskSubmission() async {
-    if (_titleController.text.trim().isEmpty || _dueDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Title and due date are required')),
-      );
-      return;
-    }
-
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
-      if (widget.taskId != null && widget.taskToEdit != null) {
-        // Update existing task
-        await widget.databaseService.updateTask(
-          taskId: widget.taskId!,
-          title: _titleController.text.trim(),
-          description: _descriptionController.text.trim(),
-          status: _status,
-          dueDate: _dueDate!,
-          assignedTo: _assignedTo ?? '',
-        );
-      } else {
-        // Create new task
-        await widget.databaseService.addTask(
-          title: _titleController.text.trim(),
-          description: _descriptionController.text.trim(),
-          assignedTo: _assignedTo ?? user.uid,
-          groupId: widget.groupId,
-          status: _status,
-          dueDate: _dueDate!,
-        );
-      }
-
-      if (!mounted) return;
-      Navigator.pop(context);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
-      );
     }
   }
 
@@ -180,92 +77,269 @@ class TaskDialogState extends State<TaskDialog> {
     super.dispose();
   }
 
-  Widget _buildMemberDropdown() {
-    if (_isLoadingMembers) {
-      return const CircularProgressIndicator();
-    }
+  // In _TaskDialogState
+  Future<void> _loadGroupMembers() async {
+    if (_isLoading || widget.groupId.isEmpty) return;
 
-    if (_groupMembers.isEmpty) {
-      return const Text('No members available');
-    }
+    setState(() => _isLoading = true);
 
-    return DropdownButtonFormField<String>(
-      value: _assignedTo,
-      items: _groupMembers.map((member) {
-        return DropdownMenuItem<String>(
-          value: member['id'],
-          child: Text('${member['name']} (${member['email']})'),
-        );
-      }).toList(),
-      onChanged: (String? newValue) {
+    try {
+      final membersList =
+          await widget.databaseService.getGroupMembers(widget.groupId);
+
+      if (mounted) {
         setState(() {
-          _assignedTo = newValue;
+          _members = membersList;
+          _isLoading = false;
+
+          // Auto-select current user if they're in the group
+          final currentUserInGroup = _members.firstWhere(
+            (m) => m['userId'] == widget.currentUserId,
+            orElse: () => {},
+          );
+
+          if (currentUserInGroup.isNotEmpty) {
+            _assignedToUserId = widget.currentUserId;
+            _assignedToUserName = currentUserInGroup['name'];
+          }
+          // Otherwise select first member if exists
+          else if (_members.isNotEmpty) {
+            _assignedToUserId = _members.first['userId'];
+            _assignedToUserName = _members.first['name'];
+          }
         });
-      },
-      decoration: const InputDecoration(
-        labelText: 'Assign To',
-        border: OutlineInputBorder(),
-      ),
+      }
+    } catch (e) {
+      debugPrint('Error loading group members: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading members: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadAssignedUserDetails() async {
+    if (_assignedToUserId == null) return;
+
+    // First check if the user is in the members list we already have
+    final assignedMember = _members.firstWhere(
+      (member) => member['userId'] == _assignedToUserId,
+      orElse: () => {'userId': '', 'name': ''},
     );
+
+    if (assignedMember['userId'].isNotEmpty) {
+      setState(() {
+        _assignedToUserName = assignedMember['name'];
+      });
+      return;
+    }
+
+    // If not found in list, fetch from Firestore
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_assignedToUserId)
+          .get();
+
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>?;
+        if (userData != null && mounted) {
+          setState(() {
+            _assignedToUserName = userData['name'] ?? 'Unknown User';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading assigned user: $e');
+    }
+  }
+
+  Future<void> _saveTask() async {
+    if (_titleController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Task title is required')),
+      );
+      return;
+    }
+
+    // Only validate assigned user if we have more than one member
+    if (_members.length > 1 && _assignedToUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please assign the task to a member')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Make sure we have an assigned user, even if just one member
+      final String assignedTo = _assignedToUserId ??
+          (_members.isNotEmpty
+              ? _members.first['userId']
+              : widget.currentUserId);
+
+      final taskData = {
+        'title': _titleController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'dueDate': Timestamp.fromDate(_selectedDate),
+        'status': _status,
+        'assignedTo': assignedTo,
+        'groupID': widget.groupId,
+        'createdBy': widget.currentUserId,
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      if (widget.taskId != null) {
+        // Update existing task
+        await FirebaseFirestore.instance
+            .collection('tasks')
+            .doc(widget.taskId)
+            .update(taskData);
+      } else {
+        // Create new task
+        taskData['createdAt'] = FieldValue.serverTimestamp();
+        await FirebaseFirestore.instance.collection('tasks').add(taskData);
+      }
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(
+                  widget.taskId != null ? 'Task updated' : 'Task created')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving task: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${e.toString()}')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.taskId != null ? 'Edit Task' : 'Add New Task'),
+      title: Text(widget.taskId != null ? 'Edit Task' : 'Add Task'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             TextField(
               controller: _titleController,
               decoration: const InputDecoration(
-                labelText: 'Task Title',
+                labelText: 'Title',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _descriptionController,
-              decoration: const InputDecoration(
-                labelText: 'Description',
-                border: OutlineInputBorder(),
-              ),
               maxLines: 3,
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _status,
-              items: ['Pending', 'In Progress', 'Completed']
-                  .map((status) => DropdownMenuItem(
-                        value: status,
-                        child: Text(status),
-                      ))
-                  .toList(),
-              onChanged: (value) {
-                setState(() {
-                  _status = value!;
-                });
-              },
               decoration: const InputDecoration(
-                labelText: 'Status',
+                labelText: 'Description (Optional)',
                 border: OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),
-            if (widget.groupId != null) ...[
-              _buildMemberDropdown(),
-              const SizedBox(height: 16),
-            ],
             ListTile(
-              title: Text(
-                _dueDate == null
-                    ? 'Select due date'
-                    : 'Due: ${DateFormat.yMd().format(_dueDate!)}',
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Due Date'),
+              subtitle: Text(DateFormat('yyyy-MM-dd').format(_selectedDate)),
+              trailing: IconButton(
+                icon: const Icon(Icons.calendar_today),
+                onPressed: () async {
+                  final pickedDate = await showDatePicker(
+                    context: context,
+                    initialDate: _selectedDate,
+                    firstDate:
+                        DateTime.now().subtract(const Duration(days: 365)),
+                    lastDate: DateTime.now().add(const Duration(days: 365 * 5)),
+                  );
+                  if (pickedDate != null && mounted) {
+                    setState(() => _selectedDate = pickedDate);
+                  }
+                },
               ),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: () => _selectDueDate(context),
             ),
+
+            // Removed status dropdown - it will default to In-Progress
+            // We'll keep it for editing existing tasks to allow toggling to Completed
+            if (widget.taskToEdit != null) ...[
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                decoration: const InputDecoration(
+                  labelText: 'Status',
+                  border: OutlineInputBorder(),
+                ),
+                value: _status,
+                items: _statusOptions.map((status) {
+                  return DropdownMenuItem<String>(
+                    value: status,
+                    child: Text(status),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _status = value);
+                  }
+                },
+              ),
+            ],
+
+            const SizedBox(height: 16),
+            if (_isLoading)
+              const Center(child: CircularProgressIndicator())
+            else if (_members.isEmpty)
+              const Text('No members available')
+            else if (_members.length == 1)
+              // For single member groups, just show who the task is assigned to
+              InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Assigned To',
+                  border: OutlineInputBorder(),
+                ),
+                child: Text(_assignedToUserName),
+              )
+            else
+              // For multiple members, show the dropdown
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Assigned To', style: TextStyle(fontSize: 12)),
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    value: _assignedToUserId,
+                    hint: Text(_assignedToUserName),
+                    items: _members.map((member) {
+                      return DropdownMenuItem<String>(
+                        value: member['userId'],
+                        child: Text('${member['name']} (${member['email']})'),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        final selectedMember = _members.firstWhere(
+                          (m) => m['userId'] == value,
+                          orElse: () =>
+                              {'userId': value, 'name': 'Unknown User'},
+                        );
+                        setState(() {
+                          _assignedToUserId = value;
+                          _assignedToUserName = selectedMember['name'];
+                        });
+                      }
+                    },
+                  ),
+                ],
+              ),
           ],
         ),
       ),
@@ -274,9 +348,15 @@ class TaskDialogState extends State<TaskDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
-        TextButton(
-          onPressed: _handleTaskSubmission,
-          child: const Text('Save'),
+        ElevatedButton(
+          onPressed: _isLoading ? null : _saveTask,
+          child: _isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Text(widget.taskId != null ? 'Update' : 'Create'),
         ),
       ],
     );

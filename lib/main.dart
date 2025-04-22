@@ -112,20 +112,20 @@ class _MyAppState extends State<MyApp> {
         debugShowCheckedModeBanner: false,
         navigatorKey: navigatorKey, // Assign the global key
         home: const AuthWrapper(),
+        // Update your routes to use pushReplacementNamed when navigating
         routes: {
           '/login': (context) => const LoginScreen(),
           '/signup': (context) => const SignupScreen(),
           '/home': (context) => const HomeScreen(),
-          // Add your chat route if not already present
           '/chat': (context) {
             final chatId = ModalRoute.of(context)!.settings.arguments as String;
             return GroupChatScreen(
               chatId: chatId,
-              groupName: 'Chat', // You might want to fetch the actual name
+              groupName: 'Chat',
               currentUserId: FirebaseAuth.instance.currentUser!.uid,
-              currentUserName: 'User', // Fetch actual username
-              groupLeaderId:
-                  'leaderId', // Replace 'leaderId' with the actual leader ID
+              currentUserName:
+                  FirebaseAuth.instance.currentUser!.displayName ?? 'User',
+              groupLeaderId: 'leaderId',
             );
           },
         },
@@ -147,15 +147,14 @@ class AuthWrapper extends StatelessWidget {
         if (snapshot.connectionState == ConnectionState.active) {
           final user = snapshot.data;
           if (user != null) {
-            return const HomeScreen();
+            return const HomeScreen(key: ValueKey('homeScreen'));
           } else {
-            return const LoginScreen();
+            return const LoginScreen(key: ValueKey('loginScreen'));
           }
-        } else {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
         }
+        return const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        );
       },
     );
   }

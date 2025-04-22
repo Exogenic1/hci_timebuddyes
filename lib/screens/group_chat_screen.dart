@@ -27,7 +27,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   final TextEditingController _messageController = TextEditingController();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final ScrollController _scrollController = ScrollController();
-  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+  // final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
   late bool _isUserLeader;
 
   @override
@@ -51,8 +51,19 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     });
   }
 
+  bool _isSending = false;
+
   Future<void> _sendMessage() async {
-    if (_messageController.text.trim().isEmpty || !mounted) return;
+    if (_messageController.text.trim().isEmpty || !mounted || _isSending) {
+      return;
+    }
+
+    // Set the flag to prevent duplicate sends
+    _isSending = true;
+
+    // Store the message text and clear immediately
+    final messageText = _messageController.text.trim();
+    _messageController.clear();
 
     try {
       await _firestore
@@ -60,7 +71,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           .doc(widget.chatId)
           .collection('messages')
           .add({
-        'text': _messageController.text.trim(),
+        'text': messageText,
         'senderId': widget.currentUserId,
         'senderName': widget.currentUserName,
         'timestamp': FieldValue.serverTimestamp(),
@@ -68,14 +79,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       });
 
       await _firestore.collection('chats').doc(widget.chatId).update({
-        'lastMessage': _messageController.text.trim(),
+        'lastMessage': messageText,
         'lastMessageTime': FieldValue.serverTimestamp(),
         'lastSenderId': widget.currentUserId,
       });
 
       if (mounted) {
-        await _sendPushNotifications();
-        _messageController.clear();
+        await _sendPushNotifications(messageText);
         _scrollToBottom();
       }
     } catch (e) {
@@ -84,10 +94,17 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           SnackBar(content: Text('Failed to send message: $e')),
         );
       }
+    } finally {
+      // Reset the flag when done
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
     }
   }
 
-  Future<void> _sendPushNotifications() async {
+  Future<void> _sendPushNotifications(String messageText) async {
     if (!mounted) return;
 
     try {
@@ -116,7 +133,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         'tokens': tokens,
         'title': widget.groupName,
         'body':
-            '${widget.currentUserName}${_isUserLeader ? " (Leader)" : ""}: ${_messageController.text.trim()}',
+            '${widget.currentUserName}${_isUserLeader ? " (Leader)" : ""}: $messageText',
         'chatId': widget.chatId,
         'timestamp': FieldValue.serverTimestamp(),
       });
@@ -366,6 +383,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Text(widget.groupName),
         actions: [
           if (_isUserLeader)

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:time_buddies/screens/home.dart';
 import 'package:time_buddies/services/auth_service.dart';
 import 'dart:math' as math;
 import 'dart:async';
@@ -161,8 +162,10 @@ class _LoginScreenState extends State<LoginScreen> {
         // Sign in with email and password
         final user = await authService.signInWithEmail(email, password);
         if (user != null) {
-          // Navigate to the home screen
-          Navigator.pushReplacementNamed(context, '/home');
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => const HomeScreen()),
+          );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -187,11 +190,32 @@ class _LoginScreenState extends State<LoginScreen> {
         await authService.signInWithGoogle(context);
       },
       style: ElevatedButton.styleFrom(
-          minimumSize: const Size(double.infinity, 50),
-          backgroundColor: const Color.fromARGB(255, 214, 193, 162)),
-      child: const Text(
-        'Sign in with Google',
-        style: TextStyle(color: Colors.white, fontSize: 16),
+        minimumSize: const Size(double.infinity, 50),
+        backgroundColor: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+          side: const BorderSide(color: Colors.grey, width: 1),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset(
+            'assets/google_logo.png',
+            height: 24,
+            width: 24,
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            'Sign in with Google',
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -1,26 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:time_buddies/services/database_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:time_buddies/widgets/task_dialog.dart';
+import 'package:intl/intl.dart';
 
 class TaskList extends StatelessWidget {
   final String userId;
 
   const TaskList({super.key, required this.userId});
-
-  Future<void> _deleteTask(BuildContext context, String taskId) async {
-    try {
-      await FirebaseFirestore.instance.collection('tasks').doc(taskId).delete();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Task deleted successfully')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting task: $e')),
-      );
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,10 +24,6 @@ class TaskList extends StatelessWidget {
                 const Icon(Icons.error_outline, size: 48, color: Colors.red),
                 const SizedBox(height: 16),
                 Text('Error: ${snapshot.error}'),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Retry'),
-                ),
               ],
             ),
           );
@@ -53,25 +34,13 @@ class TaskList extends StatelessWidget {
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
+          return const Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.assignment_outlined,
-                    size: 48, color: Colors.grey),
-                const SizedBox(height: 16),
-                const Text('You do not have any tasks yet'),
-                const SizedBox(height: 8),
-                TextButton(
-                  onPressed: () => showDialog(
-                    context: context,
-                    builder: (context) => TaskDialog(
-                      databaseService:
-                          Provider.of<DatabaseService>(context, listen: false),
-                    ),
-                  ),
-                  child: const Text('Add your first task'),
-                ),
+                Icon(Icons.assignment_outlined, size: 48, color: Colors.grey),
+                SizedBox(height: 16),
+                Text('You do not have any tasks assigned'),
               ],
             ),
           );
@@ -82,57 +51,226 @@ class TaskList extends StatelessWidget {
           itemCount: snapshot.data!.docs.length,
           itemBuilder: (context, index) {
             final task = snapshot.data!.docs[index];
-            final taskId = task.id;
             final data = task.data() as Map<String, dynamic>;
             final title = data['title'];
             final description = data['description'];
-            final status = data['status'];
+            final isCompleted = data['completed'] ?? false;
+            final isLocked = data['locked'] ?? false;
             final dueDate = (data['dueDate'] as Timestamp).toDate();
+            final groupId = data['groupID'];
 
-            Color statusColor = Colors.grey;
-            if (status == 'Pending') statusColor = Colors.orange;
-            if (status == 'In Progress') statusColor = Colors.blue;
-            if (status == 'Completed') statusColor = Colors.green;
+            // Determine status
+            String status;
+            Color statusColor;
 
-            return Dismissible(
-              key: Key(taskId),
-              background: Container(
-                color: Colors.red,
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.only(right: 20),
-                child: const Icon(Icons.delete, color: Colors.white),
-              ),
-              onDismissed: (direction) => _deleteTask(context, taskId),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Card(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  elevation: 4,
-                  color: Colors.white,
-                  child: ListTile(
-                    title: Text(title),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (description.isNotEmpty) Text(description),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Due: ${dueDate.toLocal().toString().split(' ')[0]}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey,
+            if (isCompleted) {
+              final completedDate = data['completedAt'] != null
+                  ? (data['completedAt'] as Timestamp).toDate()
+                  : DateTime.now();
+
+              if (completedDate.isAfter(dueDate)) {
+                status = 'Late';
+                statusColor = Colors.red;
+              } else {
+                status = 'Completed';
+                statusColor = Colors.green;
+              }
+            } else {
+              if (DateTime.now().isAfter(dueDate)) {
+                status = 'Overdue';
+                statusColor = Colors.red;
+              } else {
+                status = 'Pending';
+                statusColor = Colors.orange;
+              }
+            }
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8.0),
+              child: Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                elevation: 2,
+                child: Column(
+                  children: [
+                    ListTile(
+                      title: Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          decoration:
+                              isCompleted ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (description?.isNotEmpty ?? false)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                description,
+                                style: const TextStyle(color: Colors.grey),
+                              ),
+                            ),
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(
+                              children: [
+                                Icon(Icons.calendar_today,
+                                    size: 16,
+                                    color: DateTime.now().isAfter(dueDate) &&
+                                            !isCompleted
+                                        ? Colors.red
+                                        : Theme.of(context).primaryColor),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Due: ${DateFormat('MMM d, y').format(dueDate)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: DateTime.now().isAfter(dueDate) &&
+                                            !isCompleted
+                                        ? Colors.red
+                                        : Colors.black87,
+                                    fontWeight:
+                                        DateTime.now().isAfter(dueDate) &&
+                                                !isCompleted
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Add group name display
+                          FutureBuilder<DocumentSnapshot>(
+                            future: FirebaseFirestore.instance
+                                .collection('groups')
+                                .doc(groupId)
+                                .get(),
+                            builder: (context, groupSnapshot) {
+                              String groupName = 'Personal Task';
+
+                              if (groupSnapshot.hasData &&
+                                  groupSnapshot.data!.exists) {
+                                final groupData = groupSnapshot.data!.data()
+                                    as Map<String, dynamic>;
+                                groupName =
+                                    groupData['name'] ?? 'Unnamed Group';
+                              }
+
+                              return Padding(
+                                padding: const EdgeInsets.only(top: 4),
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.group,
+                                        size: 16,
+                                        color: Theme.of(context).primaryColor),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Group: $groupName',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: statusColor),
+                        ),
+                        child: Text(
+                          status,
+                          style: TextStyle(
+                            color: statusColor,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                    trailing: Chip(
-                      label: Text(status,
-                          style: const TextStyle(color: Colors.white)),
-                      backgroundColor: statusColor,
-                    ),
-                  ),
+                    // Add checkbox if task is not locked
+                    if (!isLocked)
+                      Padding(
+                        padding:
+                            const EdgeInsets.only(right: 16.0, bottom: 8.0),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Text(
+                              'Mark as complete:',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                            Checkbox(
+                              value: isCompleted,
+                              onChanged: (value) async {
+                                if (value != null) {
+                                  // Determine status
+                                  String newStatus;
+                                  if (value) {
+                                    if (DateTime.now().isAfter(dueDate)) {
+                                      newStatus = 'Late';
+                                    } else {
+                                      newStatus = 'Completed';
+                                    }
+                                  } else {
+                                    if (DateTime.now().isAfter(dueDate)) {
+                                      newStatus = 'Overdue';
+                                    } else {
+                                      newStatus = 'Pending';
+                                    }
+                                  }
+
+                                  // Update task
+                                  try {
+                                    await FirebaseFirestore.instance
+                                        .collection('tasks')
+                                        .doc(task.id)
+                                        .update({
+                                      'completed': value,
+                                      'completedAt': value
+                                          ? FieldValue.serverTimestamp()
+                                          : null,
+                                      'status': newStatus,
+                                      'locked': value, // Lock when completed
+                                    });
+
+                                    if (value == true) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          content:
+                                              Text('Task marked as $newStatus'),
+                                          duration: const Duration(seconds: 2),
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content:
+                                            Text('Error updating task: $e'),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
             );

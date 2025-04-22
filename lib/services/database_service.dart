@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/widgets.dart';
+import 'package:time_buddies/services/data_validation_service.dart';
 
 class DatabaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -11,15 +13,18 @@ class DatabaseService {
     String? profilePicture,
     String? fcmToken,
   }) async {
+    final validationService = DataValidationService();
+    await validationService.validateUserData(userID);
+
     await _firestore.collection('users').doc(userID).set({
       'name': name,
       'email': email,
       'profilePicture': profilePicture ?? '',
       'fcmToken': fcmToken,
-      'createdAt': DateTime.now(),
-      'updatedAt': DateTime.now(),
-      'groups': [],
-    }, SetOptions(merge: true)); // Use merge to not overwrite existing data
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+      'groups': FieldValue.arrayUnion([]),
+    }, SetOptions(merge: true));
   }
 
 // Add this new method
@@ -29,13 +34,119 @@ class DatabaseService {
       'updatedAt': DateTime.now(),
     });
   }
+// Add these methods to database_service.dart
 
-  // Update user's groups
+  Future<bool> isUserGroupLeader(String userId, String groupId) async {
+    try {
+      final groupDoc = await _firestore.collection('groups').doc(groupId).get();
+      if (!groupDoc.exists) return false;
+
+      final data = groupDoc.data() as Map<String, dynamic>;
+      return data['leaderId'] == userId;
+    } catch (e) {
+      debugPrint('Error checking leader status: $e');
+      return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getGroupMembersWithDetails(
+      String groupId) async {
+    try {
+      final groupDoc = await _firestore.collection('groups').doc(groupId).get();
+      if (!groupDoc.exists) return [];
+
+      final data = groupDoc.data() as Map<String, dynamic>;
+      final membersList =
+          List<Map<String, dynamic>>.from(data['members'] ?? []);
+
+      return membersList;
+    } catch (e) {
+      debugPrint('Error fetching group members: $e');
+      return [];
+    }
+  }
+
+// Method to get user's completed tasks
+  Future<List<Map<String, dynamic>>> getUserCompletedTasks(
+      String userId, String groupId) async {
+    try {
+      final tasksSnapshot = await _firestore
+          .collection('tasks')
+          .where('groupID', isEqualTo: groupId)
+          .where('assigneeId', isEqualTo: userId)
+          .where('completed', isEqualTo: true)
+          .get();
+
+      return tasksSnapshot.docs.map((doc) {
+        final data = doc.data();
+        return {...data, 'id': doc.id};
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching completed tasks: $e');
+      return [];
+    }
+  }
+
+  // Add this method to your DatabaseService class
+  Future<List<Map<String, dynamic>>> getGroupMembers(String groupId) async {
+    try {
+      final groupDoc = await _firestore.collection('groups').doc(groupId).get();
+      if (!groupDoc.exists) return [];
+
+      final groupData = groupDoc.data() as Map<String, dynamic>?;
+      final members = groupData?['members'] ?? [];
+
+      List<Map<String, dynamic>> membersList = [];
+
+      if (members is List) {
+        // First get all member IDs
+        List<String> memberIds = [];
+        for (var member in members) {
+          if (member is String) {
+            memberIds.add(member);
+          } else if (member is Map) {
+            final userId = member['userId'] ?? member['id'] ?? member['uid'];
+            if (userId != null) memberIds.add(userId.toString());
+          }
+        }
+
+        // Fetch all user documents in a single query
+        if (memberIds.isNotEmpty) {
+          final usersSnapshot = await _firestore
+              .collection('users')
+              .where(FieldPath.documentId, whereIn: memberIds)
+              .get();
+
+          for (var doc in usersSnapshot.docs) {
+            membersList.add({
+              'userId': doc.id,
+              'name': doc['name'] ?? 'Unknown User',
+              'email': doc['email'] ?? '',
+            });
+          }
+        }
+      }
+
+      return membersList;
+    } catch (e) {
+      debugPrint('Error getting group members: $e');
+      return [];
+    }
+  }
+
   Future<void> updateUserGroups({
     required String userID,
     required List<String> groups,
   }) async {
-    await _firestore.collection('users').doc(userID).update({
+    final docRef = _firestore.collection('users').doc(userID);
+    final doc = await docRef.get();
+
+    if (!doc.exists) {
+      await addUser(
+          userID: userID, name: '', email: ''); // Create basic user first
+    }
+
+    await docRef.update({
       'groups': groups,
       'updatedAt': DateTime.now(),
     });
@@ -82,15 +193,19 @@ class DatabaseService {
     required String description,
     required String assignedTo,
     String? groupId,
-    required String status,
     required DateTime dueDate,
   }) async {
+    // Determine initial status
+    String status = 'Pending';
+
     final taskData = {
       'title': title,
       'description': description,
       'assignedTo': assignedTo,
       'status': status,
       'dueDate': dueDate,
+      'completed': false,
+      'locked': false,
       'createdAt': DateTime.now(),
       'updatedAt': DateTime.now(),
     };
@@ -148,7 +263,67 @@ class DatabaseService {
     });
   }
 
+  // Add these new methods to DatabaseService
+  Future<void> loadUserGroups(String userId) async {
+    try {
+      final validationService = DataValidationService();
+      await validationService.validateUserData(userId);
+
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        final groups = List<String>.from(userDoc['groups'] ?? []);
+
+        // Validate each group
+        for (String groupId in groups) {
+          await validationService.validateGroupData(groupId);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading user groups: $e');
+    }
+  }
+
+  Future<List<String>> getUserGroupIds(String userId) async {
+    try {
+      final userDoc = await _firestore.collection('users').doc(userId).get();
+      if (userDoc.exists) {
+        return List<String>.from(userDoc['groups'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error getting user group IDs: $e');
+      return [];
+    }
+  }
+
+  Future<void> verifyGroupMembership(String userId, String groupId) async {
+    try {
+      // Check if user is in group's members list
+      final groupDoc = await _firestore.collection('groups').doc(groupId).get();
+      if (groupDoc.exists) {
+        final members = groupDoc['members'] ?? [];
+        bool isMember = members.any((member) {
+          if (member is String) return member == userId;
+          if (member is Map) return member['userId'] == userId;
+          return false;
+        });
+
+        if (!isMember) {
+          // Add user to group if not already a member
+          await addGroupMember(
+            groupId: groupId,
+            userId: userId,
+            role: 'member',
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error verifying group membership: $e');
+    }
+  }
+
 // In the groups collection
+  // In database_service.dart
   Future<void> addGroupMember({
     required String groupId,
     required String userId,
@@ -158,10 +333,11 @@ class DatabaseService {
       'members': FieldValue.arrayUnion([
         {
           'userId': userId,
-          'role': role, // e.g., 'admin', 'member', 'leader'
+          'role': role,
           'joinedAt': DateTime.now(),
         }
       ]),
+      'updatedAt': DateTime.now(),
     });
   }
 

@@ -1,7 +1,6 @@
 // assign_member_dialog.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 class AssignMemberDialog extends StatefulWidget {
   final String groupId;
@@ -28,6 +27,7 @@ class _AssignMemberDialogState extends State<AssignMemberDialog> {
     _loadGroupMembers();
   }
 
+  // In assign_member_dialog.dart
   Future<void> _loadGroupMembers() async {
     try {
       final groupDoc = await FirebaseFirestore.instance
@@ -35,25 +35,39 @@ class _AssignMemberDialogState extends State<AssignMemberDialog> {
           .doc(widget.groupId)
           .get();
 
-      final memberIds = List<String>.from(groupDoc['members']);
+      final membersData = groupDoc['members'];
       final members = <Map<String, dynamic>>[];
 
-      for (var memberId in memberIds) {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(memberId)
-            .get();
-        members.add({
-          'id': memberId,
-          'name': userDoc['name'],
-          'email': userDoc['email'],
-        });
+      if (membersData is List) {
+        for (var member in membersData) {
+          if (member is String) {
+            final userDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(member)
+                .get();
+            members.add({
+              'id': member,
+              'name': userDoc['name'],
+              'email': userDoc['email'],
+            });
+          } else if (member is Map) {
+            final memberId = member['userId'] ?? member['id'];
+            final userDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(memberId)
+                .get();
+            members.add({
+              'id': memberId,
+              'name': userDoc['name'] ?? member['name'],
+              'email': userDoc['email'] ?? member['email'],
+            });
+          }
+        }
       }
 
       setState(() {
         _members = members;
         _isLoading = false;
-        // Default to current user if available
         if (_members.any((m) => m['id'] == widget.currentUserId)) {
           _selectedMemberId = widget.currentUserId;
         }

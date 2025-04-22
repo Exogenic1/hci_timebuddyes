@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import 'package:time_buddies/screens/group_chat_screen.dart';
+import 'package:time_buddies/services/data_validation_service.dart';
+import 'package:time_buddies/services/database_service.dart';
 
 class CollaborationScreen extends StatefulWidget {
   const CollaborationScreen({super.key});
@@ -38,6 +41,23 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
     }
 
     try {
+      // First check if a group with this name already exists
+      final existingGroups = await _firestore
+          .collection('groups')
+          .where('createdBy', isEqualTo: _currentUser!.uid)
+          .where('name', isEqualTo: _groupNameController.text.trim())
+          .get();
+
+      if (existingGroups.docs.isNotEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('You already have a group with this name')),
+          );
+        }
+        return;
+      }
+
       final groupRef = _firestore.collection('groups').doc();
       final groupId = groupRef.id;
 
@@ -52,10 +72,10 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
         'members': [
           {
             'userId': _currentUser.uid,
+            'name': _currentUser.displayName ?? 'Group Leader',
+            'email': _currentUser.email,
             'role': 'leader',
             'joinedAt': DateTime.now(),
-            'name': _currentUser.displayName ?? 'Leader',
-            'email': _currentUser.email,
           }
         ],
         'tasks': [],
@@ -105,39 +125,68 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
     }
   }
 
+  // Update the _joinGroup method
   Future<void> _joinGroup(String groupId) async {
     if (_currentUser == null || !mounted || groupId.isEmpty) return;
 
     try {
-      final groupDoc = await _firestore.collection('groups').doc(groupId).get();
-      if (!groupDoc.exists) {
-        throw Exception('Group not found');
+      final databaseService =
+          Provider.of<DatabaseService>(context, listen: false);
+      final validationService = DataValidationService();
+
+      // Validate the group exists
+      await validationService.validateGroupData(groupId);
+
+      // Check if user is already in the group
+      final userGroups =
+          await databaseService.getUserGroupIds(_currentUser.uid);
+      if (userGroups.contains(groupId)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+                content: Text('You are already a member of this group')),
+          );
+        }
+        return;
       }
 
-      final groupData = groupDoc.data();
-      if (groupData == null) throw Exception('Group data is null');
+      // Get user data
+      final userDoc =
+          await _firestore.collection('users').doc(_currentUser.uid).get();
+      final userData = userDoc.data() as Map<String, dynamic>?;
+      final userName =
+          userData?['name'] ?? _currentUser.displayName ?? 'Member';
+      final userEmail = _currentUser.email ?? '';
 
+      // Add user to group
       await _firestore.collection('groups').doc(groupId).update({
         'members': FieldValue.arrayUnion([
           {
             'userId': _currentUser.uid,
+            'name': userName,
+            'email': userEmail,
             'role': 'member',
             'joinedAt': DateTime.now(),
           }
         ]),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      await _firestore.collection('chats').doc(groupId).update({
-        'members': FieldValue.arrayUnion([_currentUser.uid]),
-      });
-
+      // Add group to user's groups list
       await _firestore.collection('users').doc(_currentUser.uid).update({
         'groups': FieldValue.arrayUnion([groupId]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update chat members
+      await _firestore.collection('chats').doc(groupId).update({
+        'members': FieldValue.arrayUnion([_currentUser.uid]),
+        'updatedAt': FieldValue.serverTimestamp(),
       });
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Joined group successfully!')),
+          const SnackBar(content: Text('Successfully joined group')),
         );
       }
     } catch (e) {
@@ -235,6 +284,7 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: false,
           title: const Text('Collaboration'),
           bottom: const TabBar(
             tabs: [

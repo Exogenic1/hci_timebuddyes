@@ -269,6 +269,7 @@ class _SignupScreenState extends State<SignupScreen> {
           );
 
           // Navigate to the home screen
+          // After successful login/signup
           Navigator.pushReplacementNamed(context, '/home');
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -294,11 +295,32 @@ class _SignupScreenState extends State<SignupScreen> {
         await authService.signInWithGoogle(context);
       },
       style: ElevatedButton.styleFrom(
-          minimumSize: const Size(double.infinity, 50),
-          backgroundColor: const Color.fromARGB(255, 214, 193, 162)),
-      child: const Text(
-        'Sign up with Google',
-        style: TextStyle(color: Colors.white, fontSize: 16),
+        minimumSize: const Size(double.infinity, 50),
+        backgroundColor: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+          side: const BorderSide(color: Colors.grey, width: 1),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset(
+            'assets/google_logo.png',
+            height: 24,
+            width: 24,
+          ),
+          const SizedBox(width: 12),
+          const Text(
+            'Sign up with Google',
+            style: TextStyle(
+              color: Colors.black87,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:provider/provider.dart';
+import 'package:time_buddies/services/data_validation_service.dart';
 import 'package:time_buddies/services/database_service.dart';
 
 class AuthService {
@@ -17,13 +18,11 @@ class AuthService {
   Future<void> signInWithGoogle(BuildContext context) async {
     try {
       await _googleSignIn.signOut();
-
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return;
 
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
-
       final AuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
@@ -33,12 +32,32 @@ class AuthService {
           await _auth.signInWithCredential(credential);
 
       if (userCredential.user != null) {
-        // Handle navigation and database operations safely
-        await _handleSuccessfulSignIn(
-          context: context,
-          user: userCredential.user!,
-          googleUser: googleUser,
+        // Get FCM token
+        String? fcmToken;
+        try {
+          fcmToken = await _firebaseMessaging.getToken();
+          await _firebaseMessaging.subscribeToTopic('all_users');
+        } catch (e) {
+          debugPrint('Error getting FCM token: $e');
+        }
+
+        // Update user data and groups
+        final databaseService =
+            Provider.of<DatabaseService>(context, listen: false);
+        await databaseService.addUser(
+          userID: userCredential.user!.uid,
+          name: googleUser.displayName ?? 'User',
+          email: googleUser.email,
+          profilePicture: googleUser.photoUrl ?? '',
+          fcmToken: fcmToken,
         );
+
+        // Load user groups
+        await databaseService.loadUserGroups(userCredential.user!.uid);
+
+        if (context.mounted) {
+          Navigator.of(context).pushReplacementNamed('/home');
+        }
       }
     } on FirebaseAuthException catch (e) {
       _handleAuthError(context, 'Google sign-in failed: ${e.message}');
@@ -57,6 +76,7 @@ class AuthService {
   }) async {
     final databaseService =
         Provider.of<DatabaseService>(context, listen: false);
+    final validationService = DataValidationService();
 
     // Get FCM token
     String? fcmToken;
@@ -67,6 +87,8 @@ class AuthService {
       debugPrint('Error getting FCM token: $e');
     }
 
+    // Validate and update user data
+    await validationService.validateUserData(user.uid);
     await databaseService.addUser(
       userID: user.uid,
       name: googleUser.displayName ?? 'User',
@@ -75,7 +97,13 @@ class AuthService {
       fcmToken: fcmToken,
     );
 
-    // Safe navigation using NavigatorState
+    // Validate all group memberships
+    await validationService.validateAllUserGroups(user.uid);
+
+    // Load user groups
+    await databaseService.loadUserGroups(user.uid);
+
+    // Safe navigation
     if (context.mounted) {
       Navigator.of(context).pushReplacementNamed('/home');
     }

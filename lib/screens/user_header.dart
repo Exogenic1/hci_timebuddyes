@@ -35,8 +35,13 @@ class UserHeader extends StatelessWidget {
                     .doc(user.uid)
                     .snapshots(),
                 builder: (context, snapshot) {
+                  if (snapshot.hasError) {
+                    debugPrint('User data error: ${snapshot.error}');
+                  }
                   if (snapshot.hasData && snapshot.data!.exists) {
-                    final username = snapshot.data!['name'] ?? 'User';
+                    final data = snapshot.data!.data() as Map<String, dynamic>;
+                    final username =
+                        data.containsKey('name') ? data['name'] : 'User';
                     return Text(
                       '@$username',
                       style: const TextStyle(
@@ -45,6 +50,7 @@ class UserHeader extends StatelessWidget {
                       ),
                     );
                   }
+
                   return const Text(
                     '@User',
                     style: TextStyle(
@@ -63,9 +69,15 @@ class UserHeader extends StatelessWidget {
                 .snapshots(),
             builder: (context, snapshot) {
               String? photoUrl;
+
               if (snapshot.hasData && snapshot.data!.exists) {
-                photoUrl = snapshot.data!['profilePicture'];
+                final data = snapshot.data!.data() as Map<String, dynamic>;
+
+                if (data.containsKey('profilePicture')) {
+                  photoUrl = data['profilePicture'];
+                }
               }
+
               return CircleAvatar(
                 radius: 25,
                 backgroundImage: photoUrl != null && photoUrl.isNotEmpty
