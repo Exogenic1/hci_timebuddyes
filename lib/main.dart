@@ -1,8 +1,8 @@
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:time_buddies/screens/group_chat_screen.dart';
 import 'package:time_buddies/services/notifications_service.dart';
 import 'screens/login_screen.dart';
@@ -28,7 +28,7 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final NotificationsService _notificationsService = NotificationsService();
+  final NotificationService _notificationService = NotificationService();
 
   @override
   void initState() {
@@ -36,63 +36,47 @@ class _MyAppState extends State<MyApp> {
     _initializeNotifications();
   }
 
-  // Add this in your main.dart (where you initialize the app)
   Future<void> _initializeNotifications() async {
-    await _notificationsService.initialize(
-      onMessageCallback: (message) {
-        // Handle the notification (will work even without context)
-        debugPrint('Received notification: ${message.notification?.body}');
+    // Initialize notification settings
+    await _notificationService.initializeSettings();
 
-        // If you need to show UI, use the navigatorKey approach
-        if (message.notification != null) {
-          navigatorKey.currentState?.push(
-            MaterialPageRoute(
-              builder: (context) => AlertDialog(
-                title: const Text('New Notification'),
-                content: Text(message.notification!.body ?? ''),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('OK'),
-                  ),
-                ],
-              ),
+    // Handle foreground notifications
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      if (message.notification != null) {
+        debugPrint(
+            'Foreground notification received: ${message.notification!.body}');
+        navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (context) => AlertDialog(
+              title: Text(message.notification!.title ?? 'Notification'),
+              content: Text(
+                  message.notification!.body ?? 'You have a new notification'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
             ),
-          );
-        }
-      },
-    );
-  }
-
-  void _handleNotification(RemoteMessage message) {
-    // Only handle if the app is in foreground
-    if (message.notification != null) {
-      // Show a dialog or snackbar using the navigatorKey
-      navigatorKey.currentState?.push(
-        MaterialPageRoute(
-          builder: (context) => AlertDialog(
-            title: Text(message.notification?.title ?? 'New Message'),
-            content:
-                Text(message.notification?.body ?? 'You have a new message'),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  // Navigate to specific screen if needed
-                  if (message.data['chatId'] != null) {
-                    navigatorKey.currentState?.pushNamed(
-                      '/chat',
-                      arguments: message.data['chatId'],
-                    );
-                  }
-                },
-                child: const Text('OK'),
-              ),
-            ],
           ),
-          fullscreenDialog: true,
-        ),
-      );
+        );
+      }
+    });
+
+    // Handle background notifications when the app is opened
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      if (message.data['chatId'] != null) {
+        navigatorKey.currentState?.pushNamed(
+          '/chat',
+          arguments: message.data['chatId'],
+        );
+      }
+    });
+
+    // Update FCM token for the current user
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await _notificationService.updateFcmToken(user.uid);
     }
   }
 
@@ -102,9 +86,7 @@ class _MyAppState extends State<MyApp> {
       providers: [
         Provider<AuthService>(create: (_) => AuthService()),
         Provider<DatabaseService>(create: (_) => DatabaseService()),
-        Provider<NotificationsService>(
-          create: (_) => _notificationsService,
-        ),
+        Provider<NotificationService>(create: (_) => _notificationService),
       ],
       child: MaterialApp(
         title: 'TimeBuddies',
@@ -112,7 +94,6 @@ class _MyAppState extends State<MyApp> {
         debugShowCheckedModeBanner: false,
         navigatorKey: navigatorKey, // Assign the global key
         home: const AuthWrapper(),
-        // Update your routes to use pushReplacementNamed when navigating
         routes: {
           '/login': (context) => const LoginScreen(),
           '/signup': (context) => const SignupScreen(),

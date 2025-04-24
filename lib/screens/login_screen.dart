@@ -160,7 +160,8 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         // Sign in with email and password
-        final user = await authService.signInWithEmail(email, password);
+        final user =
+            await authService.signInWithEmail(context, email, password);
         if (user != null) {
           Navigator.pushReplacement(
             context,

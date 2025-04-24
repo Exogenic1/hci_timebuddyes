@@ -258,18 +258,10 @@ class _SignupScreenState extends State<SignupScreen> {
         }
 
         // Sign up with email and password
-        final user = await authService.signUpWithEmail(email, password);
+        final user =
+            await authService.signUpWithEmail(context, email, password, name);
         if (user != null) {
-          // Add user to Firestore
-          await databaseService.addUser(
-            userID: user.uid,
-            name: name,
-            email: email,
-            profilePicture: '', // You can add a profile picture later
-          );
-
           // Navigate to the home screen
-          // After successful login/signup
           Navigator.pushReplacementNamed(context, '/home');
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
