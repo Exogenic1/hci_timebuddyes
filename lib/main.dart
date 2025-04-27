@@ -14,9 +14,23 @@ import 'services/database_service.dart';
 // Global key for navigation
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
+// This handler needs to be defined at the top level for background message handling
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Ensure Firebase is initialized
+  await Firebase.initializeApp();
+
+  // Handle the background message here
+  print("Handling a background message: ${message.messageId}");
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+
+  // Register the background handler
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
   runApp(const MyApp());
 }
 
@@ -40,43 +54,79 @@ class _MyAppState extends State<MyApp> {
     // Initialize notification settings
     await _notificationService.initializeSettings();
 
-    // Handle foreground notifications
+    // Set up foreground notification handler to show dialog
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      if (message.notification != null) {
-        debugPrint(
-            'Foreground notification received: ${message.notification!.body}');
-        navigatorKey.currentState?.push(
-          MaterialPageRoute(
-            builder: (context) => AlertDialog(
-              title: Text(message.notification!.title ?? 'Notification'),
-              content: Text(
-                  message.notification!.body ?? 'You have a new notification'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
+      if (message.notification != null && navigatorKey.currentContext != null) {
+        showDialog(
+          context: navigatorKey.currentContext!,
+          builder: (_) => AlertDialog(
+            title: Text(message.notification?.title ?? 'Notification'),
+            content: Text(message.notification?.body ?? 'Task reminder'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(navigatorKey.currentContext!),
+                child: const Text('OK'),
+              ),
+            ],
           ),
         );
       }
     });
 
-    // Handle background notifications when the app is opened
+    // Initialize for current user if logged in
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await _notificationService.initializeForUser(user.uid);
+    }
+
+    // Handle notification routing on tap when app is in background/terminated
+    FirebaseMessaging.instance
+        .getInitialMessage()
+        .then((RemoteMessage? message) {
+      if (message != null) {
+        _handleInitialMessage(message);
+      }
+    });
+
+    // Handle app opened from notification when in background
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      if (message.data['chatId'] != null) {
+      _handleBackgroundNotificationTap(message);
+    });
+  }
+
+  void _handleInitialMessage(RemoteMessage message) {
+    // Handle notification that opened the app from terminated state
+    if (message.data['chatId'] != null) {
+      // Delay navigation to ensure app is fully initialized
+      Future.delayed(const Duration(milliseconds: 500), () {
         navigatorKey.currentState?.pushNamed(
           '/chat',
           arguments: message.data['chatId'],
         );
-      }
-    });
+      });
+    } else if (message.data['taskId'] != null) {
+      // Navigate to task details
+      Future.delayed(const Duration(milliseconds: 500), () {
+        navigatorKey.currentState?.pushNamed(
+          '/task',
+          arguments: message.data['taskId'],
+        );
+      });
+    }
+  }
 
-    // Update FCM token for the current user
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      await _notificationService.updateFcmToken(user.uid);
+  void _handleBackgroundNotificationTap(RemoteMessage message) {
+    // Handle notification tap when app is in background
+    if (message.data['chatId'] != null) {
+      navigatorKey.currentState?.pushNamed(
+        '/chat',
+        arguments: message.data['chatId'],
+      );
+    } else if (message.data['taskId'] != null) {
+      navigatorKey.currentState?.pushNamed(
+        '/task',
+        arguments: message.data['taskId'],
+      );
     }
   }
 
@@ -87,6 +137,11 @@ class _MyAppState extends State<MyApp> {
         Provider<AuthService>(create: (_) => AuthService()),
         Provider<DatabaseService>(create: (_) => DatabaseService()),
         Provider<NotificationService>(create: (_) => _notificationService),
+        // Add stream provider for notification badge count
+        StreamProvider<int>(
+          create: (_) => _notificationService.notificationCountStream,
+          initialData: 0,
+        ),
       ],
       child: MaterialApp(
         title: 'TimeBuddies',
@@ -109,25 +164,34 @@ class _MyAppState extends State<MyApp> {
               groupLeaderId: 'leaderId',
             );
           },
+          // '/task': (context) {
+          //   final taskId = ModalRoute.of(context)!.settings.arguments as String;
+          //   return TaskDetailScreen(taskId: taskId);
+          // },
         },
       ),
     );
   }
 }
 
-// AuthWrapper remains unchanged
+// AuthWrapper with updated method name
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context, listen: false);
+    final notificationService =
+        Provider.of<NotificationService>(context, listen: false);
+
     return StreamBuilder<User?>(
       stream: authService.authStateChanges,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.active) {
           final user = snapshot.data;
           if (user != null) {
+            // Initialize notifications with user ID using the correct method name
+            notificationService.initializeForUser(user.uid);
             return const HomeScreen(key: ValueKey('homeScreen'));
           } else {
             return const LoginScreen(key: ValueKey('loginScreen'));

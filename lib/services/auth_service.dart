@@ -59,6 +59,7 @@ class AuthService {
     required User user,
     required GoogleSignInAccount googleUser,
   }) async {
+    // Get services before any async operations
     final databaseService =
         Provider.of<DatabaseService>(context, listen: false);
     final validationService = DataValidationService();
@@ -72,25 +73,34 @@ class AuthService {
       debugPrint('Error getting FCM token: $e');
     }
 
-    // Validate and update user data
-    await validationService.validateUserData(user.uid);
-    await databaseService.addUser(
-      userID: user.uid,
-      name: googleUser.displayName ?? 'User',
-      email: googleUser.email,
-      profilePicture: googleUser.photoUrl ?? '',
-      fcmToken: fcmToken,
-    );
+    try {
+      // Validate and update user data
+      await validationService.validateUserData(user.uid);
+      await databaseService.addUser(
+        userID: user.uid,
+        name: googleUser.displayName ?? 'User',
+        email: googleUser.email,
+        profilePicture: googleUser.photoUrl ?? '',
+        fcmToken: fcmToken,
+      );
 
-    // Validate all group memberships
-    await validationService.validateAllUserGroups(user.uid);
+      // Validate all group memberships
+      await validationService.validateAllUserGroups(user.uid);
 
-    // Load user groups
-    await databaseService.loadUserGroups(user.uid);
+      // Load user groups
+      await databaseService.loadUserGroups(user.uid);
 
-    // Safe navigation
-    if (context.mounted) {
-      Navigator.of(context).pushReplacementNamed('/home');
+      // Safe navigation
+      if (context.mounted) {
+        Navigator.of(context).pushReplacementNamed('/home');
+      }
+    } catch (e) {
+      debugPrint('Error in handleSuccessfulSignIn: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error during sign-in: ${e.toString()}')),
+        );
+      }
     }
   }
 

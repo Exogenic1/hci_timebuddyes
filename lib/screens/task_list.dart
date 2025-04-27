@@ -9,6 +9,7 @@ class TaskList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Modified query - removed filter for completed status to show all tasks
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('tasks')
@@ -196,80 +197,99 @@ class TaskList extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // Add checkbox if task is not locked
-                    if (!isLocked)
-                      Padding(
-                        padding:
-                            const EdgeInsets.only(right: 16.0, bottom: 8.0),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Text(
-                              'Mark as complete:',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[700],
-                              ),
+                    // Show checkbox for all tasks, even if locked, but make it disabled for locked tasks
+                    Padding(
+                      padding: const EdgeInsets.only(right: 16.0, bottom: 8.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            isLocked ? 'Task completed:' : 'Mark as complete:',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[700],
                             ),
-                            Checkbox(
-                              value: isCompleted,
-                              onChanged: (value) async {
-                                if (value != null) {
-                                  // Determine status
-                                  String newStatus;
-                                  if (value) {
-                                    if (DateTime.now().isAfter(dueDate)) {
-                                      newStatus = 'Late';
-                                    } else {
-                                      newStatus = 'Completed';
-                                    }
-                                  } else {
-                                    if (DateTime.now().isAfter(dueDate)) {
-                                      newStatus = 'Overdue';
-                                    } else {
-                                      newStatus = 'Pending';
-                                    }
-                                  }
+                          ),
+                          Checkbox(
+                            value: isCompleted,
+                            onChanged: isLocked
+                                ? null // Disable for locked tasks
+                                : (value) async {
+                                    if (value != null) {
+                                      // Determine status
+                                      String newStatus;
+                                      if (value) {
+                                        if (DateTime.now().isAfter(dueDate)) {
+                                          newStatus = 'Late';
+                                        } else {
+                                          newStatus = 'Completed';
+                                        }
+                                      } else {
+                                        if (DateTime.now().isAfter(dueDate)) {
+                                          newStatus = 'Overdue';
+                                        } else {
+                                          newStatus = 'Pending';
+                                        }
+                                      }
 
-                                  // Update task
-                                  try {
-                                    await FirebaseFirestore.instance
-                                        .collection('tasks')
-                                        .doc(task.id)
-                                        .update({
-                                      'completed': value,
-                                      'completedAt': value
-                                          ? FieldValue.serverTimestamp()
-                                          : null,
-                                      'status': newStatus,
-                                      'locked': value, // Lock when completed
-                                    });
+                                      // Update task
+                                      try {
+                                        await FirebaseFirestore.instance
+                                            .collection('tasks')
+                                            .doc(task.id)
+                                            .update({
+                                          'completed': value,
+                                          'completedAt': value
+                                              ? FieldValue.serverTimestamp()
+                                              : null,
+                                          'status': newStatus,
+                                          'locked':
+                                              value, // Lock when completed
+                                        });
 
-                                    if (value == true) {
-                                      ScaffoldMessenger.of(context)
-                                          .showSnackBar(
-                                        SnackBar(
-                                          content:
-                                              Text('Task marked as $newStatus'),
-                                          duration: const Duration(seconds: 2),
-                                        ),
-                                      );
+                                        if (value == true) {
+                                          // Show a success message
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                  'Task marked as $newStatus'),
+                                              duration:
+                                                  const Duration(seconds: 1),
+                                            ),
+                                          );
+
+                                          // If we're in the calendar view, navigate back to home
+                                          if (ModalRoute.of(context)
+                                                  ?.settings
+                                                  .name !=
+                                              '/') {
+                                            // Navigate to home page after a brief delay
+                                            Future.delayed(
+                                                const Duration(
+                                                    milliseconds: 1500), () {
+                                              Navigator.popUntil(context,
+                                                  (route) => route.isFirst);
+                                            });
+                                          }
+                                        }
+                                      } catch (e) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          SnackBar(
+                                            content:
+                                                Text('Error updating task: $e'),
+                                            duration:
+                                                const Duration(seconds: 2),
+                                          ),
+                                        );
+                                      }
                                     }
-                                  } catch (e) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content:
-                                            Text('Error updating task: $e'),
-                                        duration: const Duration(seconds: 2),
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
-                            ),
-                          ],
-                        ),
+                                  },
+                          ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ),
