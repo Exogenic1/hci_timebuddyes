@@ -2,7 +2,7 @@
     package="com.example.timebuddies">
     <uses-permission android:name="android.permission.INTERNET"/>
     <application
-        android:label="timebuddies"
+        android:label="TimeBuddies"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

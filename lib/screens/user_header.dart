@@ -8,24 +8,22 @@ class UserHeader extends StatelessWidget {
   const UserHeader({super.key});
 
   Widget _buildAvatar(String? profilePictureUrl, bool isGoogleUser) {
-    if (profilePictureUrl == null || profilePictureUrl.isEmpty) {
-      // Fallback for users without a profile picture
-      return CircleAvatar(
-        radius: 25,
-        backgroundColor: Colors.white.withOpacity(0.3),
-        child: const Icon(Icons.person, color: Colors.white, size: 30),
-      );
-    }
+    // For Google users, use their Google profile picture
+    if (isGoogleUser) {
+      final user = FirebaseAuth.instance.currentUser;
+      final photoURL = user?.photoURL;
 
-    if (isGoogleUser || profilePictureUrl.startsWith('https://')) {
-      // For Google users or legacy URL-based profile pictures
-      return CircleAvatar(
-        radius: 25,
-        backgroundColor: Colors.white.withOpacity(0.3),
-        backgroundImage: CachedNetworkImageProvider(profilePictureUrl),
-      );
-    } else {
-      // For app users with RandomAvatar string
+      if (photoURL != null && photoURL.isNotEmpty) {
+        return CircleAvatar(
+          radius: 25,
+          backgroundColor: Colors.white.withOpacity(0.3),
+          backgroundImage: CachedNetworkImageProvider(photoURL),
+        );
+      }
+    }
+    // For TimeBuddies Email users, use RandomAvatar
+    else if (profilePictureUrl != null && profilePictureUrl.isNotEmpty) {
+      // Use RandomAvatar for app users
       return ClipOval(
         child: SizedBox(
           height: 50,
@@ -38,6 +36,13 @@ class UserHeader extends StatelessWidget {
         ),
       );
     }
+
+    // Fallback for any user without an avatar
+    return CircleAvatar(
+      radius: 25,
+      backgroundColor: Colors.white.withOpacity(0.3),
+      child: const Icon(Icons.person, color: Colors.white, size: 30),
+    );
   }
 
   @override

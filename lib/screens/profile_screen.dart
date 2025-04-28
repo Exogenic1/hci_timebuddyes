@@ -315,28 +315,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildProfileAvatar(
       String userId, String? profilePictureUrl, bool isGoogleUser) {
-    if (isGoogleUser &&
-        profilePictureUrl != null &&
-        profilePictureUrl.isNotEmpty) {
-      // For Google users, use their Google profile picture
-      return CircleAvatar(
-        radius: 60,
-        backgroundColor: Colors.grey[300],
-        backgroundImage: CachedNetworkImageProvider(profilePictureUrl),
-      );
-    } else if (!isGoogleUser &&
-        profilePictureUrl != null &&
-        profilePictureUrl.isNotEmpty) {
-      // For app users with a random avatar string
+    // For Google users, first check Firebase Auth photoURL
+    if (isGoogleUser) {
+      final user = FirebaseAuth.instance.currentUser;
+      final photoURL = user?.photoURL;
+
+      if (photoURL != null && photoURL.isNotEmpty) {
+        return CircleAvatar(
+          radius: 60,
+          backgroundColor: Colors.grey[300],
+          backgroundImage: CachedNetworkImageProvider(photoURL),
+        );
+      }
+    }
+
+    // Rest of your existing code...
+    if (profilePictureUrl != null && profilePictureUrl.isNotEmpty) {
       if (profilePictureUrl.startsWith('https://')) {
-        // Legacy users might still have URL-based profile pictures
         return CircleAvatar(
           radius: 60,
           backgroundColor: Colors.grey[300],
           backgroundImage: CachedNetworkImageProvider(profilePictureUrl),
         );
       } else {
-        // Display random avatar for app users
         return SizedBox(
           height: 120,
           width: 120,
@@ -348,7 +349,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       }
     } else {
-      // Fallback for users without a profile picture
       return CircleAvatar(
         radius: 60,
         backgroundColor: Colors.grey[300],
