@@ -6,6 +6,8 @@ import 'package:provider/provider.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:time_buddies/services/data_validation_service.dart';
 import 'package:time_buddies/services/database_service.dart';
+import 'package:time_buddies/services/notifications_service.dart';
+import 'package:time_buddies/services/task_service.dart';
 import 'package:time_buddies/widgets/task_dialog.dart';
 import 'package:time_buddies/widgets/confirmation_dialog.dart';
 import 'package:intl/intl.dart';
@@ -34,6 +36,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
       _groupsSubscription;
   DatabaseService? _databaseService;
   DataValidationService? _validationService;
+  TaskService? _taskService;
 
   @override
   void didChangeDependencies() {
@@ -41,6 +44,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
     // Store references to services in didChangeDependencies
     _databaseService = Provider.of<DatabaseService>(context, listen: false);
     _validationService = DataValidationService();
+
+    final notificationService =
+        Provider.of<NotificationService>(context, listen: false);
+    _taskService = TaskService(
+      databaseService: _databaseService!,
+      notificationService: notificationService,
+    );
   }
 
   @override
@@ -335,11 +345,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   Future<void> _completeTask(String taskId, bool isComplete) async {
     try {
-      await _firestore.collection('tasks').doc(taskId).update({
-        'completed': isComplete,
-        'completedAt': isComplete ? FieldValue.serverTimestamp() : null,
-        'locked': isComplete, // Lock the task when it's completed
-      });
+      // Use TaskService instead of direct Firestore operation
+      await _taskService?.markTaskComplete(taskId, isComplete);
 
       // Reload events after completing a task
       await _loadEvents();
@@ -352,9 +359,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
             duration: Duration(seconds: 1),
           ),
         );
-
-        // Remove the task from the calendar by reloading events
-        await _loadEvents();
       }
     } catch (e) {
       debugPrint('Error updating task: $e');
@@ -378,7 +382,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
           false;
 
       if (confirm) {
-        await _firestore.collection('tasks').doc(taskId).delete();
+        // Use TaskService instead of direct Firestore operation
+        await _taskService?.deleteTask(taskId);
         await _loadEvents();
       }
     } catch (e) {

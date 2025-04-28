@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:time_buddies/services/database_service.dart';
 import 'package:time_buddies/services/notifications_service.dart';
+import 'package:time_buddies/services/task_service.dart';
 
 class TaskDialog extends StatefulWidget {
   final DatabaseService databaseService;
@@ -39,12 +40,17 @@ class _TaskDialogState extends State<TaskDialog> {
   String? _assignedUserName;
   bool _isLoading = false;
   late NotificationService _notificationService;
+  late TaskService _taskService;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _notificationService =
         Provider.of<NotificationService>(context, listen: false);
+    _taskService = TaskService(
+      databaseService: widget.databaseService,
+      notificationService: _notificationService,
+    );
   }
 
   @override
@@ -205,36 +211,16 @@ class _TaskDialogState extends State<TaskDialog> {
         _selectedTime.minute,
       );
 
-      final taskData = {
-        'title': _titleController.text.trim(),
-        'description': _descriptionController.text.trim(),
-        'dueDate': Timestamp.fromDate(dueDate),
-        'completed': false,
-        'locked': false,
-        'groupID': widget.groupId,
-        'assignedTo': _assignedUserId,
-        'assignedToName': _assignedUserName, // Store the username
-        'createdBy': widget.currentUserId,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
-
-      String taskId;
+      // Use the TaskService instead of direct Firestore operations
       if (widget.taskId != null) {
         // Update existing task
-        taskId = widget.taskId!;
-        await FirebaseFirestore.instance
-            .collection('tasks')
-            .doc(taskId)
-            .update(taskData);
-
-        // Update task reminder
-        await _notificationService.updateTaskReminder(
-          taskId,
-          _titleController.text.trim(),
-          _descriptionController.text.trim(),
-          dueDate,
-          _assignedUserId!,
+        await _taskService.updateTask(
+          taskId: widget.taskId!,
+          title: _titleController.text.trim(),
+          description: _descriptionController.text.trim(),
+          dueDate: dueDate,
+          assignedTo: _assignedUserId!,
+          assignedToName: _assignedUserName,
         );
 
         if (mounted) {
@@ -244,25 +230,14 @@ class _TaskDialogState extends State<TaskDialog> {
         }
       } else {
         // Create new task
-        final docRef = await widget.databaseService.manageTask(
-          groupID: widget.groupId,
+        await _taskService.createTask(
           title: _titleController.text.trim(),
           description: _descriptionController.text.trim(),
           dueDate: dueDate,
           assignedTo: _assignedUserId!,
+          assignedToName: _assignedUserName,
+          groupId: widget.groupId,
           createdBy: widget.currentUserId,
-        );
-
-        taskId =
-            docRef; // Assuming docRef is already a String representing the task ID
-
-        // Schedule task reminder
-        await _notificationService.scheduleTaskReminder(
-          taskId,
-          _titleController.text.trim(),
-          _descriptionController.text.trim(),
-          dueDate,
-          _assignedUserId!,
         );
 
         if (mounted) {

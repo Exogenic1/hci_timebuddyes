@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:time_buddies/screens/group_chat_screen.dart';
+import 'package:time_buddies/services/notification_processor.dart';
 import 'package:time_buddies/services/notifications_service.dart';
+import 'package:timezone/data/latest.dart' as tz;
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/home.dart';
@@ -17,16 +19,16 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 // This handler needs to be defined at the top level for background message handling
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Ensure Firebase is initialized
   await Firebase.initializeApp();
-
-  // Handle the background message here
-  print("Handling a background message: ${message.messageId}");
+  await NotificationService().initialize();
+  await NotificationService().showLocalNotificationFromMessage(message);
 }
 
 void main() async {
+  tz.initializeTimeZones();
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  await NotificationService().initialize();
 
   // Register the background handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
@@ -51,81 +53,34 @@ class _MyAppState extends State<MyApp> {
   }
 
   Future<void> _initializeNotifications() async {
-    // Initialize notification settings
+    await _notificationService.initialize();
     await _notificationService.initializeSettings();
 
     // Set up foreground notification handler to show dialog
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      if (message.notification != null && navigatorKey.currentContext != null) {
-        showDialog(
-          context: navigatorKey.currentContext!,
-          builder: (_) => AlertDialog(
-            title: Text(message.notification?.title ?? 'Notification'),
-            content: Text(message.notification?.body ?? 'Task reminder'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(navigatorKey.currentContext!),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-      }
+      _notificationService.showLocalNotificationFromMessage(message);
     });
 
-    // Initialize for current user if logged in
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      await _notificationService.initializeForUser(user.uid);
-    }
-
-    // Handle notification routing on tap when app is in background/terminated
-    FirebaseMessaging.instance
-        .getInitialMessage()
-        .then((RemoteMessage? message) {
-      if (message != null) {
-        _handleInitialMessage(message);
-      }
+    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+      _handleNotificationTap(message);
     });
 
-    // Handle app opened from notification when in background
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      _handleBackgroundNotificationTap(message);
-    });
-  }
-
-  void _handleInitialMessage(RemoteMessage message) {
-    // Handle notification that opened the app from terminated state
-    if (message.data['chatId'] != null) {
-      // Delay navigation to ensure app is fully initialized
-      Future.delayed(const Duration(milliseconds: 500), () {
-        navigatorKey.currentState?.pushNamed(
-          '/chat',
-          arguments: message.data['chatId'],
-        );
-      });
-    } else if (message.data['taskId'] != null) {
-      // Navigate to task details
-      Future.delayed(const Duration(milliseconds: 500), () {
-        navigatorKey.currentState?.pushNamed(
-          '/task',
-          arguments: message.data['taskId'],
-        );
-      });
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      _handleNotificationTap(initialMessage);
     }
   }
 
-  void _handleBackgroundNotificationTap(RemoteMessage message) {
-    // Handle notification tap when app is in background
-    if (message.data['chatId'] != null) {
-      navigatorKey.currentState?.pushNamed(
-        '/chat',
-        arguments: message.data['chatId'],
-      );
-    } else if (message.data['taskId'] != null) {
+  void _handleNotificationTap(RemoteMessage message) {
+    if (message.data['taskId'] != null) {
       navigatorKey.currentState?.pushNamed(
         '/task',
         arguments: message.data['taskId'],
+      );
+    } else if (message.data['chatId'] != null) {
+      navigatorKey.currentState?.pushNamed(
+        '/chat',
+        arguments: message.data['chatId'],
       );
     }
   }
@@ -136,7 +91,12 @@ class _MyAppState extends State<MyApp> {
       providers: [
         Provider<AuthService>(create: (_) => AuthService()),
         Provider<DatabaseService>(create: (_) => DatabaseService()),
-        Provider<NotificationService>(create: (_) => _notificationService),
+        Provider<NotificationService>(create: (_) => NotificationService()),
+        Provider<NotificationProcessor>(
+          create: (context) => NotificationProcessor(
+            Provider.of<NotificationService>(context, listen: false),
+          ),
+        ),
         // Add stream provider for notification badge count
         StreamProvider<int>(
           create: (_) => _notificationService.notificationCountStream,

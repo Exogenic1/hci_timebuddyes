@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/widgets.dart';
 import 'package:time_buddies/services/data_validation_service.dart';
@@ -236,112 +235,12 @@ class DatabaseService {
     });
   }
 
-  // Future<String> addTaskWithNotification({
-  //   required String groupID,
-  //   required String title,
-  //   required String description,
-  //   required DateTime dueDate,
-  //   required String assignedTo,
-  //   required String createdBy,
-  // }) async {
-  //   try {
-  //     final taskData = {
-  //       'title': title,
-  //       'description': description,
-  //       'dueDate': Timestamp.fromDate(dueDate),
-  //       'status': 'In-Progress',
-  //       'assigneeId': assignedTo,
-  //       'groupID': groupID,
-  //       'createdBy': createdBy,
-  //       'completed': false,
-  //       'locked': false,
-  //       'notificationScheduled': false,
-  //       'createdAt': FieldValue.serverTimestamp(),
-  //       'updatedAt': FieldValue.serverTimestamp(),
-  //     };
-
-  //     // Add task to Firestore
-  //     final taskRef = await _firestore.collection('tasks').add(taskData);
-
-  //     // Schedule notification if due date is in the future
-  //     if (dueDate.isAfter(DateTime.now())) {
-  //       await scheduleTaskNotification(
-  //         taskId: taskRef.id,
-  //         title: title,
-  //         dueDate: dueDate,
-  //         assigneeId: assignedTo,
-  //       );
-  //     }
-
-  //     // Add task reference to group
-  //     await _firestore.collection('groups').doc(groupID).update({
-  //       'tasks': FieldValue.arrayUnion([taskRef.id]),
-  //       'updatedAt': FieldValue.serverTimestamp(),
-  //     });
-
-  //     return taskRef.id;
-  //   } catch (e) {
-  //     debugPrint('Error adding task with notification: $e');
-  //     rethrow;
-  //   }
-  // }
-
-  // // Add a task
-  // Future<String> addTask({
-  //   required String title,
-  //   required String description,
-  //   required String assignedTo,
-  //   String? groupId,
-  //   required DateTime dueDate,
-  // }) async {
-  //   // Determine initial status
-  //   String status = 'Pending';
-
-  //   final taskData = {
-  //     'title': title,
-  //     'description': description,
-  //     'assigneeId': assignedTo,
-  //     'status': status,
-  //     'dueDate': dueDate,
-  //     'completed': false,
-  //     'locked': false,
-  //     'createdAt': FieldValue.serverTimestamp(),
-  //     'updatedAt': FieldValue.serverTimestamp(),
-  //   };
-
-  //   if (groupId != null) {
-  //     taskData['groupID'] = groupId;
-  //   }
-
-  //   DocumentReference taskRef =
-  //       await _firestore.collection('tasks').add(taskData);
-
-  //   if (dueDate.isAfter(DateTime.now())) {
-  //     await scheduleTaskNotification(
-  //       taskId: taskRef.id,
-  //       title: title,
-  //       dueDate: dueDate,
-  //       assigneeId: assignedTo,
-  //     );
-  //   }
-  //   if (groupId != null) {
-  //     await _firestore.collection('groups').doc(groupId).update({
-  //       'tasks': FieldValue.arrayUnion([taskRef.id]),
-  //       'updatedAt': FieldValue.serverTimestamp(),
-  //     });
-  //   }
-
-  //   return taskRef.id;
-  // }
-
-  // Add or update a task with optimized operation handling
   Future<String> manageTask({
     required String title,
     required String description,
     required String assignedTo,
     required DateTime dueDate,
-    required String groupID,
-    String? groupId,
+    required String groupId, // Changed from groupID to groupId for consistency
     String? taskId,
     String? createdBy,
   }) async {
@@ -351,27 +250,23 @@ class DatabaseService {
     // Prepare task data
     final Map<String, dynamic> taskData = {
       'title': title,
-      'groupID': groupID,
+      'groupId': groupId, // Consistent field name
       'description': description,
-      'assigneeId': assignedTo,
+      'assignedTo': assignedTo,
       'dueDate': Timestamp.fromDate(dueDate),
-      'status': isUpdate ? null : 'Pending', // Don't override status on update
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    if (groupId != null) {
-      taskData['groupID'] = groupId;
-    }
-
-    if (createdBy != null && !isUpdate) {
-      taskData['createdBy'] = createdBy;
-    }
-
     if (!isUpdate) {
+      taskData['status'] = 'Pending';
       taskData['completed'] = false;
       taskData['locked'] = false;
       taskData['createdAt'] = FieldValue.serverTimestamp();
       taskData['notificationScheduled'] = false;
+
+      if (createdBy != null) {
+        taskData['createdBy'] = createdBy;
+      }
     }
 
     // Get or create task reference
@@ -381,15 +276,10 @@ class DatabaseService {
 
     // Add or update task
     if (isUpdate) {
-      // Remove null values from update
       taskData.removeWhere((_, value) => value == null);
       batch.update(taskRef, taskData);
     } else {
       batch.set(taskRef, taskData);
-    }
-
-    // If within a group, update the group's task list
-    if (groupId != null && !isUpdate) {
       batch.update(
         _firestore.collection('groups').doc(groupId),
         {
@@ -399,23 +289,54 @@ class DatabaseService {
       );
     }
 
-    // Execute batch
     await batch.commit();
 
-    // Schedule notification if due date is in the future
-    if (dueDate.isAfter(DateTime.now())) {
-      if (isUpdate) {
-        // Cancel existing and reschedule
-        await NotificationService().updateTaskReminder(
-            taskRef.id, title, description, dueDate, assignedTo);
-      } else {
-        // Schedule new
-        await NotificationService().scheduleTaskReminder(
-            taskRef.id, title, description, dueDate, assignedTo);
+    try {
+      // Get group name for notification
+      String groupName = "your group";
+      final groupDoc = await _firestore.collection('groups').doc(groupId).get();
+      if (groupDoc.exists && groupDoc.data() != null) {
+        groupName = groupDoc.data()!['name'] ?? 'your group';
       }
-    }
 
-    return taskRef.id;
+      // Send task assignment notification if new task
+      if (!isUpdate) {
+        await _firestore.collection('notifications').add({
+          'recipientId': assignedTo,
+          'type': 'task_assigned',
+          'title': 'New Task Assigned',
+          'message': 'You have been assigned a new task "$title" in $groupName',
+          'taskId': taskRef.id,
+          'groupId': groupId,
+          'timestamp': FieldValue.serverTimestamp(),
+          'read': false,
+        });
+
+        await NotificationService().sendTaskAssignmentNotification(
+          taskRef.id,
+          title,
+          description,
+          dueDate,
+          assignedTo,
+        );
+      }
+
+      // Schedule reminder notifications
+      if (dueDate.isAfter(DateTime.now())) {
+        if (isUpdate) {
+          await NotificationService().updateTaskReminder(
+              taskRef.id, title, description, dueDate, assignedTo);
+        } else {
+          await NotificationService().scheduleTaskReminder(
+              taskRef.id, title, description, dueDate, assignedTo);
+        }
+      }
+
+      return taskRef.id;
+    } catch (e) {
+      debugPrint('Error in manageTask post-commit operations: $e');
+      return taskRef.id;
+    }
   }
 
 // This replaces both addTask and addTaskWithNotification with a single method
@@ -429,59 +350,53 @@ class DatabaseService {
     });
   }
 
-  // In database_service.dart
+  Future<void> scheduleTaskNotifications(
+      String taskId,
+      String title,
+      String description,
+      DateTime dueDate,
+      String assignedTo,
+      String groupId,
+      String groupName) async {
+    final batch = _firestore.batch();
 
-  Future<void> scheduleTaskNotification({
-    required String taskId,
-    required String title,
-    required DateTime dueDate,
-    required String assigneeId,
-  }) async {
-    try {
-      // Schedule notification 24 hours before deadline
-      final notificationTime24h = dueDate.subtract(const Duration(hours: 24));
-
-      // Schedule notification 1 hour before deadline
-      final notificationTime1h = dueDate.subtract(const Duration(hours: 1));
-
-      final now = DateTime.now();
-
-      // Schedule 24h notification if it's in the future
-      if (notificationTime24h.isAfter(now)) {
-        await _firestore.collection('taskNotifications').add({
-          'taskId': taskId,
-          'title': 'Task Due in 24 Hours',
-          'message': '$title is due in 24 hours',
-          'dueDate': Timestamp.fromDate(dueDate),
-          'notificationTime': Timestamp.fromDate(notificationTime24h),
-          'assigneeId': assigneeId,
-          'reminderType': '24h',
-          'sent': false,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-
-      // Schedule 1h notification if it's in the future
-      if (notificationTime1h.isAfter(now)) {
-        await _firestore.collection('taskNotifications').add({
-          'taskId': taskId,
-          'title': 'Task Due in 1 Hour',
-          'message': 'Final reminder! $title is due in 1 hour',
-          'dueDate': Timestamp.fromDate(dueDate),
-          'notificationTime': Timestamp.fromDate(notificationTime1h),
-          'assigneeId': assigneeId,
-          'reminderType': '1h',
-          'sent': false,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-
-      await _firestore.collection('tasks').doc(taskId).update({
-        'notificationScheduled': true,
+    // 24 hour reminder
+    final reminder24h = dueDate.subtract(const Duration(hours: 24));
+    if (reminder24h.isAfter(DateTime.now())) {
+      final notificationRef = _firestore.collection('taskNotifications').doc();
+      batch.set(notificationRef, {
+        'taskId': taskId,
+        'title': title,
+        'message': 'Your task "$title" in $groupName is due in 24 hours',
+        'assignedTo': assignedTo,
+        'groupId': groupId,
+        'groupName': groupName,
+        'notificationTime': Timestamp.fromDate(reminder24h),
+        'reminderType': '24h',
+        'sent': false,
+        'createdAt': FieldValue.serverTimestamp(),
       });
-    } catch (e) {
-      debugPrint('Error scheduling notification: $e');
     }
+
+    // 1 hour reminder
+    final reminder1h = dueDate.subtract(const Duration(hours: 1));
+    if (reminder1h.isAfter(DateTime.now())) {
+      final notificationRef = _firestore.collection('taskNotifications').doc();
+      batch.set(notificationRef, {
+        'taskId': taskId,
+        'title': title,
+        'message': 'Your task "$title" in $groupName is due in 1 hour',
+        'assignedTo': assignedTo,
+        'groupId': groupId,
+        'groupName': groupName,
+        'notificationTime': Timestamp.fromDate(reminder1h),
+        'reminderType': '1h',
+        'sent': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
   }
 
   // Send a message to a group
@@ -730,14 +645,24 @@ class DatabaseService {
 
   // Delete a task
   Future<void> deleteTask(String taskId, String groupId) async {
-    // First remove task reference from group
-    await _firestore.collection('groups').doc(groupId).update({
-      'tasks': FieldValue.arrayRemove([taskId]),
-      'updatedAt': FieldValue.serverTimestamp(),
+    // 1. Delete reminders first
+    await FirebaseFirestore.instance
+        .collection('reminders')
+        .where('taskId', isEqualTo: taskId)
+        .get()
+        .then((snapshot) {
+      for (final doc in snapshot.docs) {
+        doc.reference.delete();
+      }
     });
 
-    // Then delete the task document
-    await _firestore.collection('tasks').doc(taskId).delete();
+    // 2. Remove from group's task list
+    await FirebaseFirestore.instance.collection('groups').doc(groupId).update({
+      'tasks': FieldValue.arrayRemove([taskId]),
+    });
+
+    // 3. Delete the task itself
+    await FirebaseFirestore.instance.collection('tasks').doc(taskId).delete();
   }
 
   // Update group
@@ -793,6 +718,24 @@ class DatabaseService {
     });
   }
 
+  Future<void> markAllNotificationsAsRead(String userId) async {
+    final batch = _firestore.batch();
+    final notificationsSnapshot = await _firestore
+        .collection('notifications')
+        .where('recipientId', isEqualTo: userId)
+        .where('read', isEqualTo: false)
+        .get();
+
+    for (var doc in notificationsSnapshot.docs) {
+      batch.update(doc.reference, {
+        'read': true,
+        'readAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+  }
+
   // Complete the checkAndProcessOverdueTasks method
   Future<void> checkAndProcessOverdueTasks() async {
     try {
@@ -800,61 +743,83 @@ class DatabaseService {
       final overdueTasks = await _firestore
           .collection('tasks')
           .where('completed', isEqualTo: false)
-          .where('isLate', isEqualTo: false)
+          .where('dueDate', isLessThan: Timestamp.fromDate(now))
+          .where('isLate',
+              isEqualTo: false) // Only get tasks not yet marked as late
+          .limit(100) // Process in batches
           .get();
 
+      if (overdueTasks.docs.isEmpty) return;
+
+      debugPrint('Processing ${overdueTasks.size} overdue tasks');
       final batch = _firestore.batch();
-      int updatedCount = 0;
 
       for (var doc in overdueTasks.docs) {
         final data = doc.data();
-        final dueDate = (data['dueDate'] as Timestamp).toDate();
+        final assignedTo = data['assignedTo'] ??
+            data['assigneeId']; // Handle possible field name differences
+        final taskId = doc.id;
+        final taskTitle = data['title'] ?? 'Task';
+        final groupId = data['groupID'] ?? '';
 
-        if (now.isAfter(dueDate)) {
-          // Mark task as late
-          batch.update(doc.reference, {'isLate': true});
-          updatedCount++;
-
-          // Create overdue notification
-          final assigneeId = data['assignedTo'];
-          final groupId = data['groupID'];
-          final taskTitle = data['title'];
-
-          // Get group name
+        // Get group name
+        String groupName = 'your group';
+        try {
           final groupDoc =
               await _firestore.collection('groups').doc(groupId).get();
-          final groupName = groupDoc.data()?['name'] ?? 'your group';
-
-          // Add overdue notification
-          final notificationRef = _firestore.collection('notifications').doc();
-          batch.set(notificationRef, {
-            'recipientId': assigneeId,
-            'type': 'task_overdue',
-            'title': 'Task Overdue',
-            'message': 'Your task "$taskTitle" in $groupName is now overdue',
-            'taskId': doc.id,
-            'groupId': groupId,
-            'timestamp': FieldValue.serverTimestamp(),
-            'read': false,
-          });
-
-          // If batch size is getting large, commit and create a new batch
-          if (updatedCount >= 400) {
-            // Firestore batch limit is 500
-            await batch.commit();
-            updatedCount = 0;
+          if (groupDoc.exists && groupDoc.data() != null) {
+            groupName = groupDoc.data()!['name'] ?? 'your group';
           }
+        } catch (e) {
+          debugPrint('Error getting group name: $e');
+        }
+
+        // Mark task as late
+        batch.update(doc.reference, {
+          'isLate': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // Create overdue notification
+        final notificationRef = _firestore.collection('notifications').doc();
+        final message = 'Your task "$taskTitle" in $groupName is now overdue';
+
+        batch.set(notificationRef, {
+          'recipientId': assignedTo,
+          'type': 'task_overdue',
+          'title': 'Task Overdue',
+          'message': message,
+          'taskId': taskId,
+          'groupId': groupId,
+          'timestamp': FieldValue.serverTimestamp(),
+          'read': false,
+        });
+
+        // If we have FCM token, also send a push notification
+        final userDoc =
+            await _firestore.collection('users').doc(assignedTo).get();
+        final fcmToken = userDoc.data()?['fcmToken'];
+
+        if (fcmToken != null) {
+          await _firestore.collection('pushNotifications').add({
+            'token': fcmToken,
+            'title': 'Task Overdue',
+            'body': message,
+            'data': {
+              'type': 'task_overdue',
+              'taskId': taskId,
+              'groupId': groupId,
+            },
+            'userId': assignedTo,
+            'createdAt': FieldValue.serverTimestamp(),
+            'sent': false,
+          });
         }
       }
 
-      // Commit any remaining updates
-      if (updatedCount > 0) {
-        await batch.commit();
-      }
-
-      debugPrint('Processed ${overdueTasks.size} tasks for overdue status');
+      await batch.commit();
     } catch (e) {
-      debugPrint('Error processing overdue tasks: $e');
+      debugPrint('Error checking overdue tasks: $e');
     }
   }
 
@@ -868,6 +833,7 @@ class DatabaseService {
           .where('notificationTime',
               isLessThanOrEqualTo: Timestamp.fromDate(now))
           .where('sent', isEqualTo: false)
+          .limit(100) // Process in batches
           .get();
 
       if (notificationsSnapshot.docs.isEmpty) return;
@@ -878,20 +844,23 @@ class DatabaseService {
 
       for (var doc in notificationsSnapshot.docs) {
         final data = doc.data();
-        final assigneeId = data['assigneeId'];
+        final assignedTo = data['assignedTo'] ??
+            data['assigneeId']; // Handle possible field name differences
         final taskId = data['taskId'];
+        final taskTitle = data['title'];
+        final message = data['message'];
+        final groupId = data['groupId'] ?? '';
 
-        // Create notification for user
+        // Create in-app notification
         final notificationRef = _firestore.collection('notifications').doc();
         batch.set(notificationRef, {
-          'recipientId': assigneeId,
-          'type': data['title'] == 'Upcoming Deadline'
-              ? 'task_reminder'
-              : 'task_due',
-          'title': data['title'],
-          'message': data['message'],
+          'recipientId': assignedTo,
+          'type':
+              data['reminderType'] == '24h' ? 'task_reminder' : 'task_due_soon',
+          'title': taskTitle,
+          'message': message,
           'taskId': taskId,
-          'groupId': data['groupId'] ?? '',
+          'groupId': groupId,
           'timestamp': FieldValue.serverTimestamp(),
           'read': false,
         });
@@ -899,6 +868,29 @@ class DatabaseService {
         // Mark notification as sent
         batch.update(doc.reference,
             {'sent': true, 'sentAt': FieldValue.serverTimestamp()});
+
+        // If we have FCM token, also send a push notification
+        final userDoc =
+            await _firestore.collection('users').doc(assignedTo).get();
+        final fcmToken = userDoc.data()?['fcmToken'];
+
+        if (fcmToken != null) {
+          await _firestore.collection('pushNotifications').add({
+            'token': fcmToken,
+            'title': taskTitle,
+            'body': message,
+            'data': {
+              'type': data['reminderType'] == '24h'
+                  ? 'task_reminder'
+                  : 'task_due_soon',
+              'taskId': taskId,
+              'groupId': groupId,
+            },
+            'userId': assignedTo,
+            'createdAt': FieldValue.serverTimestamp(),
+            'sent': false,
+          });
+        }
       }
 
       await batch.commit();
