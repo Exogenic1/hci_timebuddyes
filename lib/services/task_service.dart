@@ -144,7 +144,7 @@ class TaskService {
           updateData['completedAt'] = FieldValue.serverTimestamp();
           updateData['locked'] = true; // Lock completed tasks
         } else {
-          updateData['completedAt'] = null;
+          updateData['completedAt'] = FieldValue.delete();
           updateData['locked'] = false;
         }
       }
@@ -302,6 +302,85 @@ class TaskService {
     } catch (e) {
       debugPrint('Error fetching user tasks: $e');
       throw Exception('Failed to fetch user tasks: $e');
+    }
+  }
+
+  /// Updates task completion status with proper status tracking and locking
+  Future<void> updateTaskCompletion(String taskId, bool isCompleted) async {
+    try {
+      // Get current task data
+      final taskDoc = await _firestore.collection('tasks').doc(taskId).get();
+      if (!taskDoc.exists) {
+        throw Exception('Task not found');
+      }
+
+      final taskData = taskDoc.data()!;
+      final dueDate = (taskData['dueDate'] as Timestamp).toDate();
+      final isCurrentlyCompleted = taskData['completed'] ?? false;
+
+      // If the completion status isn't changing, return early
+      if (isCurrentlyCompleted == isCompleted) {
+        return;
+      }
+
+      // Determine the new status based on completion and due date
+      String newStatus;
+      if (isCompleted) {
+        newStatus = DateTime.now().isAfter(dueDate) ? 'Late' : 'Completed';
+      } else {
+        newStatus = DateTime.now().isAfter(dueDate) ? 'Overdue' : 'Pending';
+      }
+
+      // Prepare update data
+      final updateData = {
+        'completed': isCompleted,
+        'status': newStatus,
+        'locked': isCompleted, // Lock when completed
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      // Only set completedAt if we're marking as complete
+      if (isCompleted) {
+        updateData['completedAt'] = FieldValue.serverTimestamp();
+      } else {
+        updateData['completedAt'] = FieldValue.delete();
+      }
+
+      // Update the task
+      await taskDoc.reference.update(updateData);
+
+      // If completing the task, cancel any pending notifications
+      if (isCompleted) {
+        await _cancelPendingTaskNotifications(taskId);
+      }
+    } catch (e) {
+      debugPrint('Error updating task completion: $e');
+      throw Exception('Failed to update task completion: $e');
+    }
+  }
+
+  /// Helper method to cancel pending notifications for a task
+  Future<void> _cancelPendingTaskNotifications(String taskId) async {
+    try {
+      // Cancel Firestore notifications
+      await _firestore
+          .collection('taskNotifications')
+          .where('taskId', isEqualTo: taskId)
+          .where('sent', isEqualTo: false)
+          .get()
+          .then((snapshot) {
+        final batch = _firestore.batch();
+        for (var doc in snapshot.docs) {
+          batch.delete(doc.reference);
+        }
+        return batch.commit();
+      });
+
+      // Cancel local notifications
+      await _notificationService.cancelTaskReminder(taskId);
+    } catch (e) {
+      debugPrint('Error canceling task notifications: $e');
+      // Don't throw - this shouldn't fail the main operation
     }
   }
 }

@@ -50,10 +50,22 @@ class DatabaseService {
   // Update FCM token
   Future<void> updateFcmToken(String userId, String? fcmToken) async {
     try {
-      await _firestore.collection('users').doc(userId).update({
-        'fcmToken': fcmToken,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      final userDoc = _firestore.collection('users').doc(userId);
+      final docSnapshot = await userDoc.get();
+
+      if (docSnapshot.exists) {
+        await userDoc.update({
+          'fcmToken': fcmToken,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Create the document if it doesn't exist
+        await userDoc.set({
+          'fcmToken': fcmToken,
+          'createdAt': FieldValue.serverTimestamp(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
     } catch (e) {
       debugPrint('Error updating FCM token: $e');
       rethrow;

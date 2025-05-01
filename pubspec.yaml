@@ -50,6 +50,7 @@ dependencies:
   random_avatar: ^0.0.8
   flutter_local_notifications: ^18.0.1
   timezone: ^0.9.4
+  fl_chart: ^0.71.0
 
 dev_dependencies:
   flutter_test:

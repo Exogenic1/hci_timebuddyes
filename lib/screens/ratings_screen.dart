@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-// import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
 class RatingsScreen extends StatefulWidget {
@@ -22,11 +22,32 @@ class _RatingsScreenState extends State<RatingsScreen> {
   String? _selectedGroupId;
   Map<String, String> _groupNames = {};
   List<Map<String, dynamic>> _ratings = [];
+  bool _showMyRatings = true; // Toggle between ratings received vs. given
+  double _averageRating = 0.0; // Store user's average rating
+  int _totalRatings = 0; // Store total number of ratings
 
   @override
   void initState() {
     super.initState();
     _loadUserGroups();
+    _loadUserRatingStats();
+  }
+
+  Future<void> _loadUserRatingStats() async {
+    try {
+      final userDoc =
+          await _firestore.collection('users').doc(widget.userId).get();
+      if (userDoc.exists) {
+        final userData = userDoc.data() as Map<String, dynamic>;
+        setState(() {
+          _averageRating =
+              (userData['averageRating'] as num?)?.toDouble() ?? 0.0;
+          _totalRatings = (userData['totalRatings'] as int?) ?? 0;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading user rating stats: $e');
+    }
   }
 
   Future<void> _loadUserGroups() async {
@@ -112,7 +133,7 @@ class _RatingsScreenState extends State<RatingsScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // First get tasks for this group
+      // Get tasks for this group
       final taskDocs = await _firestore
           .collection('tasks')
           .where('groupID', isEqualTo: _selectedGroupId)
@@ -129,11 +150,15 @@ class _RatingsScreenState extends State<RatingsScreen> {
       // Get task IDs
       final taskIds = taskDocs.docs.map((doc) => doc.id).toList();
 
-      // Get ratings for these tasks
-      final ratingDocs = await _firestore
-          .collection('ratings')
-          .where('taskId', whereIn: taskIds)
-          .get();
+      // Get ratings based on toggle state
+      final Query<Map<String, dynamic>> ratingsQuery = _showMyRatings
+          ? _firestore
+              .collection('ratings')
+              .where('taskId', whereIn: taskIds)
+              .where('userId', isEqualTo: widget.userId)
+          : _firestore.collection('ratings').where('taskId', whereIn: taskIds);
+
+      final ratingDocs = await ratingsQuery.get();
 
       // Get task data to match with ratings
       final taskMap = {
@@ -141,7 +166,7 @@ class _RatingsScreenState extends State<RatingsScreen> {
           doc.id: doc.data() as Map<String, dynamic>
       };
 
-      // Combine ratings with task data
+      // Build ratings list
       final ratings = <Map<String, dynamic>>[];
       for (var ratingDoc in ratingDocs.docs) {
         final ratingData = ratingDoc.data();
@@ -149,6 +174,23 @@ class _RatingsScreenState extends State<RatingsScreen> {
         final taskData = taskMap[taskId];
 
         if (taskData != null) {
+          // If we're showing ratings given by this user (not _showMyRatings),
+          // we need to get the assignee's name
+          String? assigneeName;
+          if (!_showMyRatings) {
+            try {
+              final userDoc = await _firestore
+                  .collection('users')
+                  .doc(ratingData['userId'])
+                  .get();
+              if (userDoc.exists) {
+                assigneeName = (userDoc.data() as Map<String, dynamic>)['name'];
+              }
+            } catch (e) {
+              debugPrint('Error fetching user name: $e');
+            }
+          }
+
           ratings.add({
             'id': ratingDoc.id,
             'rating': ratingData['rating'],
@@ -157,7 +199,8 @@ class _RatingsScreenState extends State<RatingsScreen> {
             'taskTitle': taskData['title'],
             'taskDescription': taskData['description'],
             'dueDate': taskData['dueDate'],
-            // Don't include user ID to keep ratings anonymous
+            'assigneeName': assigneeName,
+            'userId': ratingData['userId'],
           });
         }
       }
@@ -186,6 +229,154 @@ class _RatingsScreenState extends State<RatingsScreen> {
       ),
       body: Column(
         children: [
+          // User rating summary
+          if (_totalRatings > 0)
+            Card(
+              margin: const EdgeInsets.all(16),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Your Performance Rating',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              ...List.generate(5, (i) {
+                                return Icon(
+                                  i < _averageRating
+                                      ? Icons.star
+                                      : Icons.star_border,
+                                  color: Colors.amber,
+                                  size: 20,
+                                );
+                              }),
+                              const SizedBox(width: 8),
+                              Text(
+                                '${_averageRating.toStringAsFixed(1)} / 5.0',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          '$_totalRatings ${_totalRatings == 1 ? 'Rating' : 'Ratings'}',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Toggle between my ratings and ratings I gave
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Card(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: BorderSide(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _showMyRatings = true;
+                              });
+                              _loadRatings();
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                color: _showMyRatings
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.transparent,
+                                borderRadius: const BorderRadius.only(
+                                  topLeft: Radius.circular(10),
+                                  bottomLeft: Radius.circular(10),
+                                ),
+                              ),
+                              child: Text(
+                                'My Ratings',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: _showMyRatings
+                                      ? Colors.white
+                                      : Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _showMyRatings = false;
+                              });
+                              _loadRatings();
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                color: !_showMyRatings
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.transparent,
+                                borderRadius: const BorderRadius.only(
+                                  topRight: Radius.circular(10),
+                                  bottomRight: Radius.circular(10),
+                                ),
+                              ),
+                              child: Text(
+                                'Ratings I Gave',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: !_showMyRatings
+                                      ? Colors.white
+                                      : Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           // Group selector
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -266,7 +457,9 @@ class _RatingsScreenState extends State<RatingsScreen> {
             Icon(Icons.star_border, size: 48, color: Colors.grey[400]),
             const SizedBox(height: 16),
             Text(
-              'No ratings found for this group',
+              _showMyRatings
+                  ? 'No ratings found for you in this group'
+                  : 'You haven\'t rated any tasks in this group',
               style: TextStyle(color: Colors.grey[600]),
             ),
           ],
@@ -281,6 +474,9 @@ class _RatingsScreenState extends State<RatingsScreen> {
         final rating = _ratings[index];
         final starRating = (rating['rating'] as num).toDouble();
         final DateTime dueDate = (rating['dueDate'] as Timestamp).toDate();
+        final DateTime? timestamp = rating['timestamp'] != null
+            ? (rating['timestamp'] as Timestamp).toDate()
+            : null;
 
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
@@ -330,22 +526,57 @@ class _RatingsScreenState extends State<RatingsScreen> {
                       style: TextStyle(color: Colors.grey[700]),
                     ),
                   ),
+
+                // Show assignee name for ratings given to others
+                if (!_showMyRatings && rating['assigneeName'] != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.person,
+                            size: 16, color: Colors.blueGrey),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Assigned to: ${rating['assigneeName']}',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey[800],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                 const SizedBox(height: 8),
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Anonymous Rating: ',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w500,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          _showMyRatings ? 'Your Rating: ' : 'Rating Given: ',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        ...List.generate(5, (i) {
+                          return Icon(
+                            i < starRating ? Icons.star : Icons.star_border,
+                            color: Colors.amber,
+                            size: 20,
+                          );
+                        }),
+                      ],
                     ),
-                    ...List.generate(5, (i) {
-                      return Icon(
-                        i < starRating ? Icons.star : Icons.star_border,
-                        color: Colors.amber,
-                        size: 20,
-                      );
-                    }),
+                    if (timestamp != null)
+                      Text(
+                        DateFormat('MMM d, y').format(timestamp),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
                   ],
                 ),
               ],
