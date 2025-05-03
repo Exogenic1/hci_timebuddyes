@@ -3,7 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:time_buddies/screens/completed_task_screen.dart';
-import 'package:time_buddies/screens/task_list.dart';
 import 'package:time_buddies/screens/user_header.dart';
 import 'package:time_buddies/screens/ratings_screen.dart';
 import 'package:time_buddies/screens/performance_stats.dart';
@@ -24,17 +23,12 @@ class _HomePageState extends State<HomePage> {
   bool _isLoadingGroups = true;
   bool _isLoadingTasks = false;
   List<Map<String, dynamic>> _incompleteTasks = [];
+  bool _isMounted = true; // Track if the widget is mounted
 
   @override
   void initState() {
     super.initState();
     _loadUserGroups();
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadUserGroups() async {
@@ -48,7 +42,10 @@ class _HomePageState extends State<HomePage> {
           .get();
 
       if (!userDoc.exists) {
-        setState(() => _isLoadingGroups = false);
+        if (_isMounted) {
+          // Check if widget is still mounted
+          setState(() => _isLoadingGroups = false);
+        }
         return;
       }
 
@@ -58,26 +55,42 @@ class _HomePageState extends State<HomePage> {
               .toList() ??
           [];
 
-      setState(() {
-        _userGroups = groups;
-        _selectedGroupId = groups.isNotEmpty ? groups.first : null;
-        _isLoadingGroups = false;
-      });
+      if (_isMounted) {
+        // Check if widget is still mounted
+        setState(() {
+          _userGroups = groups;
+          _selectedGroupId = groups.isNotEmpty ? groups.first : null;
+          _isLoadingGroups = false;
+        });
 
-      // Load incomplete tasks if a group is selected
-      if (_selectedGroupId != null) {
-        _loadIncompleteTasks(user.uid);
+        // Load incomplete tasks if a group is selected
+        if (_selectedGroupId != null) {
+          _loadIncompleteTasks(user.uid);
+        }
       }
     } catch (e) {
       debugPrint('Error loading user groups: $e');
-      setState(() => _isLoadingGroups = false);
+      if (_isMounted) {
+        // Check if widget is still mounted
+        setState(() => _isLoadingGroups = false);
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    _isMounted = false; // Mark widget as unmounted
+    _pageController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadIncompleteTasks(String userId) async {
     if (_selectedGroupId == null) return;
 
-    setState(() => _isLoadingTasks = true);
+    if (_isMounted) {
+      // Check if widget is still mounted
+      setState(() => _isLoadingTasks = true);
+    }
 
     try {
       // Check if user is a group leader
@@ -87,7 +100,10 @@ class _HomePageState extends State<HomePage> {
           .get();
 
       if (!groupDoc.exists) {
-        setState(() => _isLoadingTasks = false);
+        if (_isMounted) {
+          // Check if widget is still mounted
+          setState(() => _isLoadingTasks = false);
+        }
         return;
       }
 
@@ -159,13 +175,19 @@ class _HomePageState extends State<HomePage> {
         return aDate.compareTo(bDate);
       });
 
-      setState(() {
-        _incompleteTasks = tasks;
-        _isLoadingTasks = false;
-      });
+      if (_isMounted) {
+        // Check if widget is still mounted
+        setState(() {
+          _incompleteTasks = tasks;
+          _isLoadingTasks = false;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading incomplete tasks: $e');
-      setState(() => _isLoadingTasks = false);
+      if (_isMounted) {
+        // Check if widget is still mounted
+        setState(() => _isLoadingTasks = false);
+      }
     }
   }
 
@@ -401,7 +423,7 @@ class _HomePageState extends State<HomePage> {
               );
             }).toList(),
             onChanged: (String? newValue) {
-              if (newValue != null) {
+              if (newValue != null && _isMounted) {
                 setState(() {
                   _selectedGroupId = newValue;
                 });

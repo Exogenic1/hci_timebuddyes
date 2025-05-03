@@ -235,9 +235,7 @@ class _CompletedTasksScreenState extends State<CompletedTasksScreen>
           'dueDate': data['dueDate'] as Timestamp,
           'completionDate': data['completionDate'] as Timestamp?,
           'assignedTo': assignedTo,
-          'assignedToName': assignedTo != null
-              ? (userNames[assignedTo] ?? 'Unknown')
-              : 'Unassigned',
+          'assignedToName': data['assignedToName'] ?? 'Unknown User',
           'isLate': isLate,
           'isOverdue': isOverdue,
           'hasRated': hasRated,

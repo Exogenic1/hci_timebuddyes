@@ -64,8 +64,13 @@ class _TaskDialogState extends State<TaskDialog> {
       _assignedUserId = widget.currentUserId;
       // Find current user in members list to get name
       final currentUser = widget.membersList.firstWhere(
-        (member) => member['id'] == widget.currentUserId,
-        orElse: () => {'id': widget.currentUserId, 'name': 'Myself'},
+        (member) =>
+            member['userId'] ==
+            widget.currentUserId, // Changed 'id' to 'userId'
+        orElse: () => {
+          'userId': widget.currentUserId,
+          'name': 'Myself'
+        }, // Changed 'id' to 'userId'
       );
       _assignedUserName = currentUser['name'];
     } else {
@@ -132,18 +137,30 @@ class _TaskDialogState extends State<TaskDialog> {
   Future<void> _assignMember() async {
     // Get current user details
     final currentUser = widget.membersList.firstWhere(
-      (member) => member['id'] == widget.currentUserId,
-      orElse: () => {'id': widget.currentUserId, 'name': 'Myself', 'email': ''},
+      (member) =>
+          member['userId'] == widget.currentUserId, // Changed 'id' to 'userId'
+      orElse: () => {
+        'userId': widget.currentUserId,
+        'name': 'Myself',
+        'email': ''
+      }, // Changed 'id' to 'userId'
     );
 
     // Create a new list with current user first
     final allMembers = [
       currentUser,
-      ...widget.membersList
-          .where((member) => member['id'] != widget.currentUserId)
+      ...widget.membersList.where((member) =>
+          member['userId'] != widget.currentUserId) // Changed 'id' to 'userId'
     ];
 
     if (!mounted) return;
+
+    // Debug the members list to verify structure
+    debugPrint('Members list: ${allMembers.length} members available');
+    for (var member in allMembers) {
+      debugPrint(
+          'Member: userId=${member['userId']}, name=${member['name']}'); // Changed 'id' to 'userId'
+    }
 
     showDialog(
       context: context,
@@ -157,23 +174,43 @@ class _TaskDialogState extends State<TaskDialog> {
               itemCount: allMembers.length,
               itemBuilder: (context, index) {
                 final member = allMembers[index];
+                final memberId =
+                    member['userId'] as String?; // Changed 'id' to 'userId'
+                final memberName = member['name'] as String?;
+
+                if (memberId == null || memberId.isEmpty) {
+                  debugPrint(
+                      'WARNING: Member at index $index has null/empty userId'); // Changed 'ID' to 'userId'
+                  return const SizedBox.shrink(); // Skip invalid members
+                }
+
                 return ListTile(
                   leading: CircleAvatar(
                     child: Icon(
-                      member['id'] == widget.currentUserId
+                      memberId == widget.currentUserId
                           ? Icons.person
                           : Icons.person_outline,
                     ),
                   ),
-                  title: Text(member['name'] ?? 'Unknown User'),
+                  title: Text(memberName ?? 'Unknown User'),
                   subtitle: Text(member['email'] ?? ''),
-                  selected: member['id'] == _assignedUserId,
+                  selected: memberId == _assignedUserId,
                   onTap: () {
-                    setState(() {
-                      _assignedUserId = member['id'];
-                      _assignedUserName = member['name'];
-                    });
+                    // Save the selected values to variables
+                    final selectedId = memberId;
+                    final selectedName = memberName ?? 'Unknown User';
+
+                    // Close the dialog first
                     Navigator.pop(context);
+
+                    // Then update state with the saved values
+                    setState(() {
+                      _assignedUserId = selectedId;
+                      _assignedUserName = selectedName;
+                      // Add debug print to verify values are set
+                      debugPrint(
+                          'SELECTION MADE: User: $_assignedUserId, Name: $_assignedUserName');
+                    });
                   },
                 );
               },
@@ -192,11 +229,25 @@ class _TaskDialogState extends State<TaskDialog> {
 
   Future<void> _saveTask() async {
     if (!_formKey.currentState!.validate()) return;
-    if (_assignedUserId == null) {
+
+    // Debug the assigned user values right before validation check
+    debugPrint(
+        '*** RIGHT BEFORE CHECK - Assigned user: $_assignedUserId, $_assignedUserName');
+
+    // Prevent empty or null assigned user
+    if (_assignedUserId == null || _assignedUserId!.isEmpty) {
+      // Make sure we have a valid user ID before continuing
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please assign a member to this task')),
       );
+      debugPrint('ERROR: Invalid assignedUserId: $_assignedUserId');
       return;
+    }
+
+    // Make sure we have a valid name too
+    if (_assignedUserName == null || _assignedUserName!.isEmpty) {
+      _assignedUserName = 'Unknown User'; // Fallback name
+      debugPrint('WARNING: Using fallback name for $_assignedUserId');
     }
 
     setState(() => _isLoading = true);

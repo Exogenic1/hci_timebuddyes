@@ -282,7 +282,7 @@ class _PerformanceStatsScreenState extends State<PerformanceStatsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Performance Stats: ${widget.userName}'),
+        title: const Text('Performance Stats'),
         centerTitle: true,
       ),
       body: _isLoading
