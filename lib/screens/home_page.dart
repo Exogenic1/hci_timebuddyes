@@ -269,8 +269,7 @@ class _HomePageState extends State<HomePage> {
                             .collection('users')
                             .doc(user.uid)
                             .get();
-                        final userData =
-                            userDoc.data() as Map<String, dynamic>?;
+                        final userData = userDoc.data();
                         final userName = userData?['name'] as String? ?? 'User';
 
                         if (context.mounted) {

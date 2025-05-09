@@ -20,7 +20,6 @@ class PerformanceStatsScreen extends StatefulWidget {
 class _PerformanceStatsScreenState extends State<PerformanceStatsScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   bool _isLoading = true;
-  Map<String, dynamic> _stats = {};
   List<Map<String, dynamic>> _recentRatings = [];
   String _timeFrame = 'all'; // 'all', 'month', 'week'
   List<String> _userGroups = [];
@@ -259,12 +258,6 @@ class _PerformanceStatsScreenState extends State<PerformanceStatsScreen> {
       _averageRating = _totalRatings > 0 ? ratingSum / _totalRatings : 0;
 
       setState(() {
-        _stats = {
-          'tasksCompleted': _totalTasksCompleted,
-          'onTimePercentage': _onTimePercentage,
-          'averageRating': _averageRating,
-          'totalRatings': _totalRatings,
-        };
         _isLoading = false;
       });
     } catch (e) {

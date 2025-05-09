@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
 class RatingsScreen extends StatefulWidget {
@@ -161,10 +160,7 @@ class _RatingsScreenState extends State<RatingsScreen> {
       final ratingDocs = await ratingsQuery.get();
 
       // Get task data to match with ratings
-      final taskMap = {
-        for (var doc in taskDocs.docs)
-          doc.id: doc.data() as Map<String, dynamic>
-      };
+      final taskMap = {for (var doc in taskDocs.docs) doc.id: doc.data()};
 
       // Build ratings list
       final ratings = <Map<String, dynamic>>[];

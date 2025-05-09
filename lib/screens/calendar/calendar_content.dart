@@ -31,10 +31,6 @@ class CalendarContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
     final isKeyboardOpen = mediaQuery.viewInsets.bottom > 0;
-    final availableHeight = mediaQuery.size.height -
-        mediaQuery.padding.top -
-        mediaQuery.padding.bottom -
-        mediaQuery.viewInsets.bottom;
 
     return LayoutBuilder(builder: (context, constraints) {
       double maxCalendarHeight = isKeyboardOpen

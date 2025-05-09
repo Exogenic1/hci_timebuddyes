@@ -133,7 +133,7 @@ class DatabaseService {
       final groupDoc = await _firestore.collection('groups').doc(groupId).get();
       if (!groupDoc.exists) return [];
 
-      final groupData = groupDoc.data() as Map<String, dynamic>?;
+      final groupData = groupDoc.data();
       final members = groupData?['members'] ?? [];
 
       List<Map<String, dynamic>> membersList = [];

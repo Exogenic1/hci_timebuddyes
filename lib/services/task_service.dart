@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:time_buddies/services/database_service.dart';
@@ -151,6 +152,20 @@ class TaskService {
 
       // Update task
       await taskDoc.reference.update(updateData);
+
+      // If task was marked as completed, send a completion notification
+      if (completed == true &&
+          (taskData['completed'] == false || taskData['completed'] == null)) {
+        final currentTitle = title ?? taskData['title'];
+        final currentGroupId = groupId ?? taskData['groupID'];
+
+        // Send task completion notification
+        await _sendTaskCompletionNotification(
+          taskId,
+          currentTitle,
+          currentGroupId,
+        );
+      }
 
       // If due date or assignee changed, update notifications
       final currentTitle = title ?? taskData['title'];
@@ -352,6 +367,13 @@ class TaskService {
       // If completing the task, cancel any pending notifications
       if (isCompleted) {
         await _cancelPendingTaskNotifications(taskId);
+
+        // Send completion notification
+        await _sendTaskCompletionNotification(
+          taskId,
+          taskData['title'],
+          taskData['groupID'],
+        );
       }
     } catch (e) {
       debugPrint('Error updating task completion: $e');
@@ -381,6 +403,115 @@ class TaskService {
     } catch (e) {
       debugPrint('Error canceling task notifications: $e');
       // Don't throw - this shouldn't fail the main operation
+    }
+  }
+
+  /// Send notification when task is marked as completed
+  Future<void> _sendTaskCompletionNotification(
+      String taskId, String taskTitle, String groupId) async {
+    try {
+      final FirebaseFirestore firestore = FirebaseFirestore.instance;
+      // Get current user ID directly instead of calling through another service
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUserId == null) {
+        debugPrint('No user ID available for task completion notification');
+        return;
+      }
+
+      // Get current user and group data in parallel for efficiency
+      final userDocFuture =
+          firestore.collection('users').doc(currentUserId).get();
+      final groupDocFuture = firestore.collection('groups').doc(groupId).get();
+
+      final results = await Future.wait([userDocFuture, groupDocFuture]);
+      final userDoc = results[0];
+      final groupDoc = results[1];
+
+      // Extract data with null safety
+      String completedByName = 'A team member';
+      String groupName = 'your group';
+
+      if (userDoc.exists && userDoc.data() != null) {
+        completedByName = userDoc.data()!['name'] ?? 'A team member';
+      }
+
+      if (groupDoc.exists && groupDoc.data() != null) {
+        groupName = groupDoc.data()!['name'] ?? 'your group';
+
+        // Get group members directly from the group document
+        final members = groupDoc.data()!['members'] ?? [];
+        List<String> memberIds = [];
+
+        // Extract member IDs from the array of members
+        if (members is List) {
+          for (var member in members) {
+            if (member is String) {
+              memberIds.add(member);
+            } else if (member is Map) {
+              final userId = member['userId'] ?? member['id'];
+              if (userId != null) memberIds.add(userId.toString());
+            }
+          }
+        }
+
+        // Filter out the current user to avoid self-notification
+        memberIds = memberIds.where((id) => id != currentUserId).toList();
+
+        if (memberIds.isNotEmpty) {
+          // Prepare notification data
+          final message =
+              '$completedByName completed task "$taskTitle" in $groupName';
+          final notificationData = {
+            'type': 'task_completed',
+            'title': 'Task Completed',
+            'message': message,
+            'taskId': taskId,
+            'groupId': groupId,
+            'completedBy': currentUserId,
+            'timestamp': FieldValue.serverTimestamp(),
+            'read': false,
+          };
+
+          // Create batch for efficient writing
+          final batch = firestore.batch();
+
+          // Add a notification for each group member
+          for (String memberId in memberIds) {
+            final notificationRef = firestore.collection('notifications').doc();
+            final memberNotification =
+                Map<String, dynamic>.from(notificationData);
+            memberNotification['recipientId'] = memberId;
+            batch.set(notificationRef, memberNotification);
+
+            // Also send push notification if FCM token is available
+            final memberDoc =
+                await firestore.collection('users').doc(memberId).get();
+            final fcmToken = memberDoc.data()?['fcmToken'];
+
+            if (fcmToken != null) {
+              batch.set(firestore.collection('pushNotifications').doc(), {
+                'token': fcmToken,
+                'title': 'Task Completed',
+                'body': message,
+                'data': {
+                  'type': 'task_completed',
+                  'taskId': taskId,
+                  'groupId': groupId,
+                },
+                'userId': memberId,
+                'createdAt': FieldValue.serverTimestamp(),
+                'sent': false,
+              });
+            }
+          }
+          // Commit all notifications in one batch
+          await batch.commit();
+          debugPrint(
+              'Task completion notifications sent to ${memberIds.length} members');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error sending task completion notification: $e');
     }
   }
 }

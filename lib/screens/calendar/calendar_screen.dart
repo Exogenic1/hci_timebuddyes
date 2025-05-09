@@ -226,7 +226,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             .get();
 
         for (var doc in usersSnapshot.docs) {
-          final data = doc.data() as Map<String, dynamic>;
+          final data = doc.data();
           userNames[doc.id] =
               data['name']?.toString() ?? 'Unknown'; // Safe access
         }

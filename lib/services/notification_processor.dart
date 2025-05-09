@@ -55,7 +55,6 @@ class NotificationProcessor {
         final taskTitle = data['title'];
         final message = data['message'];
         final groupId = data['groupId'] ?? '';
-        final groupName = data['groupName'] ?? 'your group';
 
         // Create in-app notification
         final notificationRef = _firestore.collection('notifications').doc();

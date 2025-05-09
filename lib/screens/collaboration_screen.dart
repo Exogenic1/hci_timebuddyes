@@ -44,7 +44,7 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
       // First check if a group with this name already exists
       final existingGroups = await _firestore
           .collection('groups')
-          .where('createdBy', isEqualTo: _currentUser!.uid)
+          .where('createdBy', isEqualTo: _currentUser.uid)
           .where('name', isEqualTo: _groupNameController.text.trim())
           .get();
 
@@ -153,7 +153,7 @@ class _CollaborationScreenState extends State<CollaborationScreen> {
       // Get user data
       final userDoc =
           await _firestore.collection('users').doc(_currentUser.uid).get();
-      final userData = userDoc.data() as Map<String, dynamic>?;
+      final userData = userDoc.data();
       final userName =
           userData?['name'] ?? _currentUser.displayName ?? 'Member';
       final userEmail = _currentUser.email ?? '';
