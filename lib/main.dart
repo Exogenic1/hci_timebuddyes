@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:time_buddies/screens/forgot_pass_screen.dart';
 import 'package:time_buddies/screens/group_chat_screen.dart';
 import 'package:time_buddies/services/notification_processor.dart';
 import 'package:time_buddies/services/notifications_service.dart';
@@ -113,6 +114,7 @@ class _MyAppState extends State<MyApp> {
           '/login': (context) => const LoginScreen(),
           '/signup': (context) => const SignupScreen(),
           '/home': (context) => const HomeScreen(),
+          '/forgot_password': (context) => const ForgotPasswordScreen(),
           '/chat': (context) {
             final chatId = ModalRoute.of(context)!.settings.arguments as String;
             return GroupChatScreen(

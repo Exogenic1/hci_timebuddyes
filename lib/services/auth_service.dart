@@ -209,4 +209,42 @@ class AuthService {
   User? getCurrentUser() {
     return _auth.currentUser;
   }
+
+  Future<bool> sendPasswordResetEmail(
+      BuildContext context, String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Password reset email sent successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+      return true;
+    } on FirebaseAuthException catch (e) {
+      debugPrint('Password Reset Error: $e');
+      String errorMessage = 'Could not send password reset email.';
+
+      // Provide appropriate error messages
+      if (e.code == 'user-not-found') {
+        errorMessage = 'No user found with this email address.';
+      } else if (e.code == 'invalid-email') {
+        errorMessage = 'The email address is not valid.';
+      }
+
+      if (context.mounted) {
+        _handleAuthError(context, errorMessage);
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Password Reset Error: $e');
+      if (context.mounted) {
+        _handleAuthError(
+            context, 'Failed to send password reset email. Please try again.');
+      }
+      return false;
+    }
+  }
 }

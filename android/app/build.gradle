@@ -26,6 +26,10 @@ android {
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_1_8
     }
+    dependencies {
+        implementation("com.google.android.material:material:<1.0.0>")
+
+    }
 
     defaultConfig {
         applicationId = "com.example.timebuddies"
@@ -33,7 +37,6 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-        // Add any custom BuildConfig fields here if needed
         buildConfigField "String", "API_URL", "\"https://api.example.com\""
     }
 
